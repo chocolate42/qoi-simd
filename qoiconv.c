@@ -29,6 +29,9 @@ Compile with:
 #ifdef ROI
 #define EXT_STR "roi"
 #include "roi.h"
+#elif defined SOI
+#define EXT_STR "soi"
+#include "soi.h"
 #else
 #define EXT_STR "qoi"
 #include "qoi.h"
