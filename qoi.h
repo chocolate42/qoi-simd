@@ -460,7 +460,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				run = 0;
 			}
 
-/*
+#ifndef NO_INDEX
 			int index_pos;
 			index_pos = QOI_COLOR_HASH(px) % 64;
 			if (index[index_pos].v == px.v) {
@@ -469,7 +469,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				continue;
 			}
 			index[index_pos] = px;
-*/
+#endif
 
 			if(px.rgba.a!=px_prev.rgba.a){
 				bytes[p++] = QOI_OP_RGBA;
