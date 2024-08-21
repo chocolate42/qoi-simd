@@ -354,14 +354,6 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 }
 
 #define RGB_ENC_SCALAR do{\
-	int index_pos;\
-	index_pos = QOI_COLOR_HASH(px) & 63;\
-	if (index[index_pos].v == px.v) {\
-		bytes[p++] = QOI_OP_INDEX | index_pos;\
-		px_prev=px;\
-		continue;\
-	}\
-	index[index_pos] = px;\
 	signed char vr = px.rgba.r - px_prev.rgba.r;\
 	signed char vg = px.rgba.g - px_prev.rgba.g;\
 	signed char vb = px.rgba.b - px_prev.rgba.b;\
@@ -449,13 +441,13 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 			while(px.v == px_prev.v) {
 				++run;
-				if (run == 62) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
-				}
-				else if(px_pos == px_end) {
+				if(px_pos == px_end) {
 					bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
+				}
+				else if (run == 62) {
+					bytes[p++] = QOI_OP_RUN | (run - 1);
+					run = 0;
 				}
 				px_pos+=4;
 				px.rgba.r = pixels[px_pos + 0];
@@ -467,6 +459,17 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				bytes[p++] = QOI_OP_RUN | (run - 1);
 				run = 0;
 			}
+
+/*
+			int index_pos;
+			index_pos = QOI_COLOR_HASH(px) % 64;
+			if (index[index_pos].v == px.v) {
+				bytes[p++] = QOI_OP_INDEX | index_pos;
+				px_prev=px;
+				continue;
+			}
+			index[index_pos] = px;
+*/
 
 			if(px.rgba.a!=px_prev.rgba.a){
 				bytes[p++] = QOI_OP_RGBA;
@@ -491,13 +494,13 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 			while(px.v == px_prev.v) {
 				++run;
-				if (run == 62) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
-				}
-				else if(px_pos == px_end) {
+				if(px_pos == px_end) {
 					bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
+				}
+				else if (run == 62) {
+					bytes[p++] = QOI_OP_RUN | (run - 1);
+					run = 0;
 				}
 				px_pos+=3;
 				px.rgba.r = pixels[px_pos + 0];
@@ -508,6 +511,15 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				bytes[p++] = QOI_OP_RUN | (run - 1);
 				run = 0;
 			}
+
+			int index_pos;
+			index_pos = QOI_COLOR_HASH(px) % 64;
+			if (index[index_pos].v == px.v) {
+				bytes[p++] = QOI_OP_INDEX | index_pos;
+				px_prev=px;
+				continue;
+			}
+			index[index_pos] = px;
 
 			RGB_ENC_SCALAR;
 
