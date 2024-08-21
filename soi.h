@@ -198,17 +198,15 @@ QOI_OP_RGBA tags.
 The alpha value remains unchanged from the previous pixel.
 
 
-.- QOI_OP_RGBA ---------------------------------------------------.
-|         Byte[0]         | Byte[1] | Byte[2] | Byte[3] | Byte[4] |
-|  7  6  5  4  3  2  1  0 | 7 .. 0  | 7 .. 0  | 7 .. 0  | 7 .. 0  |
-|-------------------------+---------+---------+---------+---------|
-|  1  1  1  1  1  1  1  1 |   red   |  green  |  blue   |  alpha  |
-`-----------------------------------------------------------------`
+.- QOI_OP_RGBA ---------------------------.
+|         Byte[0]         | Byte[1] | ... |
+|  7  6  5  4  3  2  1  0 | 7 .. 0  | ... |
+|-------------------------+---------+-----|
+|  1  1  1  1  1  1  1  1 |  alpha  | ... |
+`-----------------------------------------`
 8-bit tag b11111111
-8-bit   red channel value
-8-bit green channel value
-8-bit  blue channel value
 8-bit alpha channel value
+RGB encoded as one of QOI_OP_LUMA222, QOI_OP_LUMA555, QOI_OP_LUMA777, QOI_OP_RGB
 
 */
 
@@ -359,6 +357,9 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	return a << 24 | b << 16 | c << 8 | d;
 }
 
+const unsigned char optable[128]={0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3};
+
 #define RGB_ENC_SCALAR do{\
 	signed char vr = px.rgba.r - px_prev.rgba.r;\
 	signed char vg = px.rgba.g - px_prev.rgba.g;\
@@ -369,20 +370,25 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	unsigned char ag = (vg<0)?(-vg)-1:vg;\
 	unsigned char ab = (vg_b<0)?(-vg_b)-1:vg_b;\
 	unsigned char argb = ar|ag|ab;\
-	if ( argb < 2 ) {\
-		bytes[p++] = QOI_OP_LUMA222 | ((vg_r + 2) << 4) | ((vg_b + 2) << 2) | (vg + 2);\
-	} else if ( argb < 16 ) {\
-		bytes[p++] = QOI_OP_LUMA555    | ((vg_b   + 16) << 2) | ((vg_r + 16)>>3);\
-		bytes[p++] = (((vg_r + 16) & 7) << 5) | (vg +  16);\
-	} else if ( argb < 64 ) {\
-		bytes[p++] = QOI_OP_LUMA777     | ((vg_b + 64)>>2);\
-		bytes[p++] = (((vg_b+64)&3)<<6) | ((vg_r + 64)>>1);\
-		bytes[p++] = (((vg_r+64)&1)<<7) | (vg+64);\
-	} else {\
-		bytes[p++] = QOI_OP_RGB;\
-		bytes[p++] = px.rgba.r;\
-		bytes[p++] = px.rgba.g;\
-		bytes[p++] = px.rgba.b;\
+	switch(optable[argb]){\
+		case 0:\
+			bytes[p++] = QOI_OP_LUMA222 | ((vg_r + 2) << 4) | ((vg_b + 2) << 2) | (vg + 2);\
+			break;\
+		case 1:\
+			bytes[p++] = QOI_OP_LUMA555    | ((vg_b   + 16) << 2) | ((vg_r + 16)>>3);\
+			bytes[p++] = (((vg_r + 16) & 7) << 5) | (vg +  16);\
+			break;\
+		case 2:\
+			bytes[p++] = QOI_OP_LUMA777     | ((vg_b + 64)>>2);\
+			bytes[p++] = (((vg_b+64)&3)<<6) | ((vg_r + 64)>>1);\
+			bytes[p++] = (((vg_r+64)&1)<<7) | (vg+64);\
+			break;\
+		case 3:\
+			bytes[p++] = QOI_OP_RGB;\
+			bytes[p++] = px.rgba.r;\
+			bytes[p++] = px.rgba.g;\
+			bytes[p++] = px.rgba.b;\
+			break;\
 	}\
 }while(0)
 
@@ -441,13 +447,13 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 			while(px.v == px_prev.v) {
 				++run;
-				if (run == 30) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
-				}
-				else if(px_pos == px_end) {
+				if(px_pos == px_end) {
 					bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
+				}
+				else if (run == 30) {
+					bytes[p++] = QOI_OP_RUN | (run - 1);
+					run = 0;
 				}
 				px_pos+=4;
 				px.rgba.r = pixels[px_pos + 0];
@@ -462,16 +468,10 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 			if(px.rgba.a!=px_prev.rgba.a){
 				bytes[p++] = QOI_OP_RGBA;
-				bytes[p++] = px.rgba.r;
-				bytes[p++] = px.rgba.g;
-				bytes[p++] = px.rgba.b;
 				bytes[p++] = px.rgba.a;
-				px_prev=px;
-				continue;
 			}
 
 			RGB_ENC_SCALAR;
-
 			px_prev = px;
 		}
 	}
@@ -483,13 +483,13 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 			while(px.v == px_prev.v) {
 				++run;
-				if (run == 30) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
-				}
-				else if(px_pos == px_end) {
+				if(px_pos == px_end) {
 					bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
+				}
+				else if (run == 30) {
+					bytes[p++] = QOI_OP_RUN | (run - 1);
+					run = 0;
 				}
 				px_pos+=3;
 				px.rgba.r = pixels[px_pos + 0];
@@ -571,6 +571,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 			run--;
 		}
 		else if (p < chunks_len) {
+			OP_RGBA_GOTO:
 			int b1 = bytes[p++];
 			if (b1 == QOI_OP_RGB) {
 				px.rgba.r = bytes[p++];
@@ -578,10 +579,8 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 				px.rgba.b = bytes[p++];
 			}
 			else if (b1 == QOI_OP_RGBA) {
-				px.rgba.r = bytes[p++];
-				px.rgba.g = bytes[p++];
-				px.rgba.b = bytes[p++];
 				px.rgba.a = bytes[p++];
+				goto OP_RGBA_GOTO;
 			}
 			else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA222) {
 				int vg = (b1 & 3) - 2;
