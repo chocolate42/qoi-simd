@@ -3,7 +3,6 @@
 Copyright (c) 2021, Dominic Szablewski - https://phoboslab.org
 SPDX-License-Identifier: MIT
 
-
 QOI - The "Quite OK Image" format for fast, lossless image compression
 
 -- About
@@ -11,7 +10,6 @@ QOI - The "Quite OK Image" format for fast, lossless image compression
 QOI encodes and decodes images in a lossless format. Compared to stb_image and
 stb_image_write QOI offers 20x-50x faster encoding, 3x-4x faster decoding and
 20% better compression.
-
 
 -- Synopsis
 
@@ -35,8 +33,6 @@ qoi_write("image_new.qoi", rgba_pixels, &(qoi_desc){
 // and colorspace read from the file header.
 qoi_desc desc;
 void *rgba_pixels = qoi_read("image.qoi", &desc, 4);
-
-
 
 -- Documentation
 
@@ -89,9 +85,7 @@ presence of an 8-bit tag first.
 
 The byte stream's end is marked with 7 0x00 bytes followed a single 0x01 byte.
 
-
 The possible chunks are:
-
 
 .- QOI_OP_LUMA232 --------.
 |         Byte[0]         |
@@ -118,7 +112,6 @@ and a bias of 2 for the red and blue channel.
 
 The alpha value remains unchanged from the previous pixel.
 
-
 .- QOI_OP_LUMA464 ----------------------------------.
 |         Byte[0]         |         Byte[1]         |
 |  7  6  5  4  3  2  1  0 |  7  6  5  4  3  2  1  0 |
@@ -144,7 +137,6 @@ and a bias of 8 for the red and blue channel.
 
 The alpha value remains unchanged from the previous pixel.
 
-
 .- QOI_OP_LUMA777 ------------------------------------------------------------.
 |         Byte[0]         |         Byte[1]         |         Byte[2]         |
 |  7  6  5  4  3  2  1  0 |  7  6  5  4  3  2  1  0 |  7  6  5  4  3  2  1  0 |
@@ -169,7 +161,6 @@ Values are stored as unsigned integers with a bias of 64 for each channel.
 
 The alpha value remains unchanged from the previous pixel.
 
-
 .- QOI_OP_RUN ------------.
 |         Byte[0]         |
 |  7  6  5  4  3  2  1  0 |
@@ -182,7 +173,6 @@ The alpha value remains unchanged from the previous pixel.
 The run-length is stored with a bias of -1. Note that the run-lengths 31 and 32
 (b111110 and b111111) are illegal as they are occupied by the QOI_OP_RGB and
 QOI_OP_RGBA tags.
-
 
 .- QOI_OP_RGB ------------------------------------------.
 |         Byte[0]         | Byte[1] | Byte[2] | Byte[3] |
@@ -197,7 +187,6 @@ QOI_OP_RGBA tags.
 
 The alpha value remains unchanged from the previous pixel.
 
-
 .- QOI_OP_RGBA ---------------------------.
 |         Byte[0]         | Byte[1] | ... |
 |  7  6  5  4  3  2  1  0 | 7 .. 0  | ... |
@@ -209,7 +198,6 @@ The alpha value remains unchanged from the previous pixel.
 RGB encoded as one of QOI_OP_LUMA232, QOI_OP_LUMA464, QOI_OP_LUMA777, QOI_OP_RGB
 
 */
-
 
 /* -----------------------------------------------------------------------------
 Header - Public functions */
@@ -254,7 +242,6 @@ failed) or the number of bytes written on success. */
 
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc);
 
-
 /* Read and decode a QOI image from the file system. If channels is 0, the
 number of channels from the file header is used. If channels is 3 or 4 the
 output format will be forced into this number of channels.
@@ -269,7 +256,6 @@ void *qoi_read(const char *filename, qoi_desc *desc, int channels);
 
 #endif /* QOI_NO_STDIO */
 
-
 /* Encode raw RGB or RGBA pixels into a QOI image in memory.
 
 The function either returns NULL on failure (invalid parameters or malloc
@@ -279,7 +265,6 @@ is set to the size in bytes of the encoded data.
 The returned qoi data should be free()d after use. */
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len);
-
 
 /* Decode a QOI image from memory.
 
@@ -291,12 +276,10 @@ The returned pixel data should be free()d after use. */
 
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels);
 
-
 #ifdef __cplusplus
 }
 #endif
 #endif /* QOI_H */
-
 
 /* -----------------------------------------------------------------------------
 Implementation */
@@ -385,7 +368,7 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 }while(0)
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
-	int i, max_size, p, run;
+	int i, max_size, p=0, run=0;
 	int px_len, px_end, px_pos, channels;
 	unsigned char *bytes;
 	const unsigned char *pixels;
@@ -397,19 +380,15 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
 		desc->height >= QOI_PIXELS_MAX / desc->width
-	) {
+	)
 		return NULL;
-	}
 
 	max_size =
 		desc->width * desc->height * (desc->channels + 1) +
 		QOI_HEADER_SIZE + sizeof(qoi_padding);
 
-	p = 0;
-	bytes = (unsigned char *) QOI_MALLOC(max_size);
-	if (!bytes) {
+	if(!(bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
-	}
 
 	qoi_write_32(bytes, &p, QOI_MAGIC);
 	qoi_write_32(bytes, &p, desc->width);
@@ -419,7 +398,6 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 
 	pixels = (const unsigned char *)data;
 
-	run = 0;
 	px_prev.rgba.r = 0;
 	px_prev.rgba.g = 0;
 	px_prev.rgba.b = 0;
@@ -462,7 +440,6 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				bytes[p++] = QOI_OP_RGBA;
 				bytes[p++] = px.rgba.a;
 			}
-
 			RGB_ENC_SCALAR;
 			px_prev = px;
 		}
@@ -492,16 +469,14 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				bytes[p++] = QOI_OP_RUN | (run - 1);
 				run = 0;
 			}
-
 			RGB_ENC_SCALAR;
 			px_prev = px;
 		}
 	}
 	DONE:
 
-	for (i = 0; i < (int)sizeof(qoi_padding); i++) {
+	for (i = 0; i < (int)sizeof(qoi_padding); i++)
 		bytes[p++] = qoi_padding[i];
-	}
 
 	*out_len = p;
 	return bytes;
@@ -519,9 +494,8 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 		data == NULL || desc == NULL ||
 		(channels != 0 && channels != 3 && channels != 4) ||
 		size < QOI_HEADER_SIZE + (int)sizeof(qoi_padding)
-	) {
+	)
 		return NULL;
-	}
 
 	bytes = (const unsigned char *)data;
 
@@ -537,19 +511,16 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 		desc->colorspace > 1 ||
 		header_magic != QOI_MAGIC ||
 		desc->height >= QOI_PIXELS_MAX / desc->width
-	) {
+	)
 		return NULL;
-	}
 
-	if (channels == 0) {
+	if (channels == 0)
 		channels = desc->channels;
-	}
 
 	px_len = desc->width * desc->height * channels;
 	pixels = (unsigned char *) QOI_MALLOC(px_len);
-	if (!pixels) {
+	if (!pixels)
 		return NULL;
-	}
 
 	px.rgba.r = 0;
 	px.rgba.g = 0;
@@ -558,9 +529,8 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 
 	chunks_len = size - (int)sizeof(qoi_padding);
 	for (px_pos = 0; px_pos < px_len; px_pos += channels) {
-		if (run > 0) {
+		if (run > 0)
 			run--;
-		}
 		else if (p < chunks_len) {
 			OP_RGBA_GOTO:
 			int b1 = bytes[p++];
@@ -594,17 +564,14 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 				px.rgba.g += vg;
 				px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
 			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN) {
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 				run = (b1 & 0x1f);
-			}
 		}
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
 		pixels[px_pos + 2] = px.rgba.b;
-		
-		if (channels == 4) {
+		if (channels == 4)
 			pixels[px_pos + 3] = px.rgba.a;
-		}
 	}
 
 	return pixels;
@@ -618,9 +585,8 @@ int qoi_write(const char *filename, const void *data, const qoi_desc *desc) {
 	int size, err;
 	void *encoded;
 
-	if (!f) {
+	if (!f)
 		return 0;
-	}
 
 	encoded = qoi_encode(data, desc, &size);
 	if (!encoded) {
@@ -642,9 +608,8 @@ void *qoi_read(const char *filename, qoi_desc *desc, int channels) {
 	int size, bytes_read;
 	void *pixels, *data;
 
-	if (!f) {
+	if (!f)
 		return NULL;
-	}
 
 	fseek(f, 0, SEEK_END);
 	size = ftell(f);
@@ -653,8 +618,7 @@ void *qoi_read(const char *filename, qoi_desc *desc, int channels) {
 		return NULL;
 	}
 
-	data = QOI_MALLOC(size);
-	if (!data) {
+	if (!(data = QOI_MALLOC(size))) {
 		fclose(f);
 		return NULL;
 	}
