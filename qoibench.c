@@ -15,6 +15,8 @@ Compile with:
 #include <stdio.h>
 #include <dirent.h>
 #include <png.h>
+#include "lz4.h"
+#include "zstd.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -311,18 +313,33 @@ int opt_nodecode = 0;
 int opt_noencode = 0;
 int opt_norecurse = 0;
 int opt_onlytotals = 0;
+int opt_nolz4 = 0;
+int opt_nozstd1 = 0;
+int opt_nozstd3 = 0;
+int opt_nozstd9 = 0;
+int opt_nozstd19 = 0;
 
 enum {
 	LIBPNG,
 	STBI,
 	QOI,
+	LZ4,
+	ZSTD1,
+	ZSTD3,
+	ZSTD9,
+	ZSTD19,
 	BENCH_COUNT /* must be the last element */
 };
 static const char *const lib_names[BENCH_COUNT] = {
 	// NOTE: pad with spaces so everything lines up properly
-	[LIBPNG] =  "libpng: ",
-	[STBI]   =  "stbi:   ",
-	[QOI]    =  EXT_STR":    ",
+	[LIBPNG] =  "libpng:     ",
+	[STBI]   =  "stbi:       ",
+	[QOI]    =  EXT_STR":        ",
+	[LZ4]    =  EXT_STR".lz4:    ",
+	[ZSTD1]    =  EXT_STR".zstd1:  ",
+	[ZSTD3]    =  EXT_STR".zstd3:  ",
+	[ZSTD9]    =  EXT_STR".zstd9:  ",
+	[ZSTD19]    =  EXT_STR".zstd19: "
 };
 
 typedef struct {
@@ -346,11 +363,20 @@ void benchmark_print_result(benchmark_result_t res) {
 	res.raw_size /= res.count;
 
 	double px = res.px;
-	printf("          decode ms   encode ms   decode mpps   encode mpps   size kb    rate\n");
+	printf("              decode ms   encode ms   decode mpps   encode mpps   size kb    rate\n");
 	for (int i = 0; i < BENCH_COUNT; ++i) {
-		if (opt_nopng && (i == LIBPNG || i == STBI)) {
+		if (opt_nopng && (i == LIBPNG || i == STBI))
 			continue;
-		}
+		if(opt_nolz4 && (i == LZ4) )
+			continue;
+		if(opt_nozstd1 && (i == ZSTD1) )
+			continue;
+		if(opt_nozstd3 && (i == ZSTD3) )
+			continue;
+		if(opt_nozstd9 && (i == ZSTD9) )
+			continue;
+		if(opt_nozstd19 && (i == ZSTD19) )
+			continue;
 		res.libs[i].encode_time /= res.count;
 		res.libs[i].decode_time /= res.count;
 		res.libs[i].size /= res.count;
@@ -388,6 +414,11 @@ void benchmark_print_result(benchmark_result_t res) {
 benchmark_result_t benchmark_image(const char *path) {
 	int encoded_png_size;
 	int encoded_qoi_size;
+	int encoded_qoi_lz4_size;
+	int encoded_qoi_zstd1_size;
+	int encoded_qoi_zstd3_size;
+	int encoded_qoi_zstd9_size;
+	int encoded_qoi_zstd19_size;
 	int w;
 	int h;
 	int channels;
@@ -409,6 +440,31 @@ benchmark_result_t benchmark_image(const char *path) {
 			.channels = channels,
 			.colorspace = QOI_SRGB
 		}, &encoded_qoi_size);
+	void *encoded_qoi_lz4=NULL;
+	void *encoded_qoi_zstd1=NULL;
+	void *encoded_qoi_zstd3=NULL;
+	void *encoded_qoi_zstd9=NULL;
+	void *encoded_qoi_zstd19=NULL;
+	if(!opt_nolz4) {
+		encoded_qoi_lz4 = malloc(LZ4_compressBound(encoded_qoi_size));
+		encoded_qoi_lz4_size = LZ4_compress_default(encoded_qoi, encoded_qoi_lz4, encoded_qoi_size, LZ4_compressBound(encoded_qoi_size));
+	}
+	if(!opt_nozstd1) {
+		encoded_qoi_zstd1 = malloc(ZSTD_compressBound(encoded_qoi_size));
+		encoded_qoi_zstd1_size = ZSTD_compress(encoded_qoi_zstd1, ZSTD_compressBound(encoded_qoi_size), encoded_qoi, encoded_qoi_size, 1);
+	}
+	if(!opt_nozstd3) {
+		encoded_qoi_zstd3 = malloc(ZSTD_compressBound(encoded_qoi_size));
+		encoded_qoi_zstd3_size = ZSTD_compress(encoded_qoi_zstd3, ZSTD_compressBound(encoded_qoi_size), encoded_qoi, encoded_qoi_size, 3);
+	}
+	if(!opt_nozstd9) {
+		encoded_qoi_zstd9 = malloc(ZSTD_compressBound(encoded_qoi_size));
+		encoded_qoi_zstd9_size = ZSTD_compress(encoded_qoi_zstd9, ZSTD_compressBound(encoded_qoi_size), encoded_qoi, encoded_qoi_size, 9);
+	}
+	if(!opt_nozstd19) {
+		encoded_qoi_zstd19 = malloc(ZSTD_compressBound(encoded_qoi_size));
+		encoded_qoi_zstd19_size = ZSTD_compress(encoded_qoi_zstd19, ZSTD_compressBound(encoded_qoi_size), encoded_qoi, encoded_qoi_size, 19);
+	}
 
 	if (!pixels || !encoded_qoi || !encoded_png) {
 		ERROR("Error encoding %s", path);
@@ -424,8 +480,6 @@ benchmark_result_t benchmark_image(const char *path) {
 		}
 		free(pixels_qoi);
 	}
-
-
 
 	benchmark_result_t res = {0};
 	res.count = 1;
@@ -457,6 +511,61 @@ benchmark_result_t benchmark_image(const char *path) {
 			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, 4);
 			free(dec_p);
 		});
+
+		if (!opt_nolz4) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LZ4].decode_time, {
+				qoi_desc desc;
+				void *dec_lz4=malloc(encoded_qoi_size);
+				LZ4_decompress_safe(encoded_qoi_lz4, dec_lz4, encoded_qoi_lz4_size, encoded_qoi_size);
+				void *dec_p = qoi_decode(dec_lz4, encoded_qoi_size, &desc, 4);
+				free(dec_p);
+				free(dec_lz4);
+			});
+		}
+
+		if (!opt_nozstd1) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD1].decode_time, {
+				qoi_desc desc;
+				void *dec=malloc(encoded_qoi_size);
+				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd1, encoded_qoi_zstd1_size);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				free(dec_p);
+				free(dec);
+			});
+		}
+
+		if (!opt_nozstd3) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD3].decode_time, {
+				qoi_desc desc;
+				void *dec=malloc(encoded_qoi_size);
+				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd3, encoded_qoi_zstd3_size);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				free(dec_p);
+				free(dec);
+			});
+		}
+
+		if (!opt_nozstd9) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD9].decode_time, {
+				qoi_desc desc;
+				void *dec=malloc(encoded_qoi_size);
+				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd9, encoded_qoi_zstd9_size);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				free(dec_p);
+				free(dec);
+			});
+		}
+
+		if (!opt_nozstd19) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD19].decode_time, {
+				qoi_desc desc;
+				void *dec=malloc(encoded_qoi_size);
+				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd19, encoded_qoi_zstd19_size);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				free(dec_p);
+				free(dec);
+			});
+		}
 	}
 
 
@@ -488,11 +597,101 @@ benchmark_result_t benchmark_image(const char *path) {
 			res.libs[QOI].size = enc_size;
 			free(enc_p);
 		});
+
+		if (!opt_nolz4) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LZ4].encode_time, {
+				int enc_size;
+				void *enc;
+				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+					.width = w,
+					.height = h, 
+					.channels = channels,
+					.colorspace = QOI_SRGB
+				}, &enc_size);
+				enc = malloc(LZ4_compressBound(enc_size));
+				res.libs[LZ4].size = LZ4_compress_default(enc_p, enc, enc_size, LZ4_compressBound(enc_size));
+				free(enc_p);
+				free(enc);
+			});
+		}
+
+		if (!opt_nozstd1) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD1].encode_time, {
+				int enc_size;
+				void *enc;
+				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+					.width = w,
+					.height = h, 
+					.channels = channels,
+					.colorspace = QOI_SRGB
+				}, &enc_size);
+				enc = malloc(ZSTD_compressBound(enc_size));
+				res.libs[ZSTD1].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 1);
+				free(enc_p);
+				free(enc);
+			});
+		}
+
+		if (!opt_nozstd3) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD3].encode_time, {
+				int enc_size;
+				void *enc;
+				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+					.width = w,
+					.height = h, 
+					.channels = channels,
+					.colorspace = QOI_SRGB
+				}, &enc_size);
+				enc = malloc(ZSTD_compressBound(enc_size));
+				res.libs[ZSTD3].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 3);
+				free(enc_p);
+				free(enc);
+			});
+		}
+
+		if (!opt_nozstd9) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD9].encode_time, {
+				int enc_size;
+				void *enc;
+				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+					.width = w,
+					.height = h, 
+					.channels = channels,
+					.colorspace = QOI_SRGB
+				}, &enc_size);
+				enc = malloc(ZSTD_compressBound(enc_size));
+				res.libs[ZSTD9].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 9);
+				free(enc_p);
+				free(enc);
+			});
+		}
+
+		if (!opt_nozstd19) {
+			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD19].encode_time, {
+				int enc_size;
+				void *enc;
+				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+					.width = w,
+					.height = h, 
+					.channels = channels,
+					.colorspace = QOI_SRGB
+				}, &enc_size);
+				enc = malloc(ZSTD_compressBound(enc_size));
+				res.libs[ZSTD19].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 19);
+				free(enc_p);
+				free(enc);
+			});
+		}
 	}
 
 	free(pixels);
 	free(encoded_png);
 	free(encoded_qoi);
+	free(encoded_qoi_lz4);
+	free(encoded_qoi_zstd1);
+	free(encoded_qoi_zstd3);
+	free(encoded_qoi_zstd9);
+	free(encoded_qoi_zstd19);
 
 	return res;
 }
@@ -582,6 +781,11 @@ int main(int argc, char **argv) {
 		printf("    --nodecode ... don't run decoders\n");
 		printf("    --norecurse .. don't descend into directories\n");
 		printf("    --onlytotals . don't print individual image results\n");
+		printf("    --nolz4 ...... don't benchmark chained lz4 compression\n");
+		printf("    --nozstd1 .... don't benchmark chained zstd compression level 1\n");
+		printf("    --nozstd3 .... don't benchmark chained zstd compression level 3\n");
+		printf("    --nozstd9 .... don't benchmark chained zstd compression level 9\n");
+		printf("    --nozstd19 ... don't benchmark chained zstd compression level 19\n");
 		printf("Examples\n");
 		printf("    "EXT_STR"bench 10 images/textures/\n");
 		printf("    "EXT_STR"bench 1 images/textures/ --nopng --nowarmup\n");
@@ -596,6 +800,11 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--nodecode") == 0) { opt_nodecode = 1; }
 		else if (strcmp(argv[i], "--norecurse") == 0) { opt_norecurse = 1; }
 		else if (strcmp(argv[i], "--onlytotals") == 0) { opt_onlytotals = 1; }
+		else if (strcmp(argv[i], "--nolz4") == 0) { opt_nolz4 = 1; }
+		else if (strcmp(argv[i], "--nozstd1") == 0) { opt_nozstd1 = 1; }
+		else if (strcmp(argv[i], "--nozstd3") == 0) { opt_nozstd3 = 1; }
+		else if (strcmp(argv[i], "--nozstd9") == 0) { opt_nozstd9 = 1; }
+		else if (strcmp(argv[i], "--nozstd19") == 0) { opt_nozstd19 = 1; }
 		else { ERROR("Unknown option %s", argv[i]); }
 	}
 
