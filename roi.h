@@ -418,12 +418,11 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 			while(px.v == px_prev.v) {
 				++run;
 				if(px_pos == px_end) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
+					for(;run>=30;run-=30)
+						bytes[p++] = 0xFD;
+					if (run)
+						bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
-				}
-				else if(run == 30) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
 				}
 				px_pos+=4;
 				px.rgba.r = pixels[px_pos + 0];
@@ -431,6 +430,8 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 				px.rgba.b = pixels[px_pos + 2];
 				px.rgba.a = pixels[px_pos + 3];
 			}
+			for(;run>=30;run-=30)
+				bytes[p++] = 0xFD;
 			if (run) {
 				bytes[p++] = QOI_OP_RUN | (run - 1);
 				run = 0;
@@ -453,18 +454,19 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 			while(px.v == px_prev.v) {
 				++run;
 				if(px_pos == px_end) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
+					for(;run>=30;run-=30)
+						bytes[p++] = 0xFD;
+					if (run)
+						bytes[p++] = QOI_OP_RUN | (run - 1);
 					goto DONE;
-				}
-				else if(run == 30) {
-					bytes[p++] = QOI_OP_RUN | (run - 1);
-					run = 0;
 				}
 				px_pos+=3;
 				px.rgba.r = pixels[px_pos + 0];
 				px.rgba.g = pixels[px_pos + 1];
 				px.rgba.b = pixels[px_pos + 2];
 			}
+			for(;run>=30;run-=30)
+				bytes[p++] = 0xFD;
 			if (run) {
 				bytes[p++] = QOI_OP_RUN | (run - 1);
 				run = 0;
