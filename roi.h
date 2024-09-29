@@ -242,6 +242,13 @@ failed) or the number of bytes written on success. */
 
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc);
 
+/* Encode directly from a PPM file to a QOI file
+
+The function returns 0 on failure (invalid parameters, or fopen or malloc
+failed) or 1 on success. */
+
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f);
+
 /* Read and decode a QOI image from the file system. If channels is 0, the
 number of channels from the file header is used. If channels is 3 or 4 the
 output format will be forced into this number of channels.
@@ -367,7 +374,7 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	}\
 }while(0)
 
-void qoi_encode_chunk3(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+inline void qoi_encode_chunk3(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp, run=*r;
 	qoi_rgba_t px, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
@@ -446,7 +453,7 @@ void qoi_encode_chunk4(const unsigned char *pixels, unsigned char *bytes, int *p
 	*pp=p;
 }
 
-void *qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px, qoi_rgba_t *px_prev) {
+void *qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
 	qoi_write_32(bytes, p, desc->height);
@@ -457,13 +464,12 @@ void *qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rg
 	px_prev->rgba.g = 0;
 	px_prev->rgba.b = 0;
 	px_prev->rgba.a = 255;
-	*px = *px_prev;
 }
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 	int i, max_size, p=0, run=0;
 	unsigned char *bytes;
-	qoi_rgba_t px, px_prev;
+	qoi_rgba_t px_prev;
 
 	if (
 		data == NULL || out_len == NULL || desc == NULL ||
@@ -481,7 +487,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 	if(!(bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
 
-	qoi_encode_init(desc, bytes, &p, &px, &px_prev);
+	qoi_encode_init(desc, bytes, &p, &px_prev);
 	if (desc->channels == 4)
 		qoi_encode_chunk4((const unsigned char *)data, bytes, &p, desc->width * desc->height, &px_prev, &run);
 	else
@@ -592,6 +598,86 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
+
+#define CHUNK 1024
+
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f) {
+	int p=0, run=0;
+	qoi_desc desc;
+	unsigned char t, *in, *out;
+	unsigned int height=0, i, maxval=0, pixels, width=0;
+	qoi_rgba_t px_prev;
+	FILE *fi = fopen(ppm_f, "rb"), *fo=fopen(qoi_f, "wb");
+	fread(&t, 1, 1, fi);
+	if(t!='P')
+		return 0;
+	fread(&t, 1, 1, fi);
+	if(t!='6')
+		return 0;
+	do fread(&t, 1, 1, fi); while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'));
+	if((t<'0')||(t>'9'))
+		return 0;
+	while((t>='0')&&(t<='9')){
+		width*=10;
+		width+=(t-'0');
+		fread(&t, 1, 1, fi);
+	}
+	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
+		return 0;
+	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
+		fread(&t, 1, 1, fi);
+	if((t<'0')||(t>'9'))
+		return 0;
+	while((t>='0')&&(t<='9')){
+		height*=10;
+		height+=(t-'0');
+		fread(&t, 1, 1, fi);
+	}
+	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
+		return 0;
+	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
+		fread(&t, 1, 1, fi);
+	if((t<'0')||(t>'9'))
+		return 0;
+	while((t>='0')&&(t<='9')){
+		maxval*=10;
+		maxval+=(t-'0');
+		fread(&t, 1, 1, fi);
+	}
+	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
+		return 0;
+	if(maxval>256)//multi-byte not supported
+		return 0;
+	printf("width %u height %u maxval %u\n", width, height, maxval);
+	desc.width=width;
+	desc.height=height;
+	desc.channels=3;
+	desc.colorspace=0;
+
+	in=malloc(CHUNK*3);
+	out=malloc(CHUNK*4);
+	qoi_encode_init(&desc, out, &p, &px_prev);
+	fwrite(out, 1, p, fo);
+	pixels=width*height;
+	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
+		fread(in, 1, CHUNK*3, fi);
+		p=0;
+		qoi_encode_chunk3(in, out, &p, CHUNK, &px_prev, &run);
+		fwrite(out, 1, p, fo);
+	}
+	if(i<pixels){
+		fread(in, 1, (pixels-i)*3, fi);
+		p=0;
+		qoi_encode_chunk3(in, out, &p, (pixels-i), &px_prev, &run);
+		fwrite(out, 1, p, fo);
+	}
+	if(run)
+		out[0] = QOI_OP_RUN | (run - 1);
+	fwrite(out, 1, 1, fo);
+	fwrite(qoi_padding, 1, sizeof(qoi_padding), fo);
+	fclose(fo);
+	return 1;
+}
 
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc) {
 	FILE *f = fopen(filename, "wb");
