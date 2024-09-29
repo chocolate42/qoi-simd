@@ -367,11 +367,102 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	}\
 }while(0)
 
+void qoi_encode_chunk3(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp, run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
+	px.rgba.a=255;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end){
+				for(;run>=30;run-=30)
+					bytes[p++] = 0xFD;
+				goto DONE;
+			}
+			px_pos+=3;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = 0xFD;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | (run - 1);
+			run = 0;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+void qoi_encode_chunk4(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp, run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		px.rgba.a = pixels[px_pos + 3];
+
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end) {
+				for(;run>=30;run-=30)
+					bytes[p++] = 0xFD;
+				goto DONE;
+			}
+			px_pos+=4;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+			px.rgba.a = pixels[px_pos + 3];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = 0xFD;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | (run - 1);
+			run = 0;
+		}
+		if(px.rgba.a!=px_prev.rgba.a){
+			bytes[p++] = QOI_OP_RGBA;
+			bytes[p++] = px.rgba.a;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+void *qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px, qoi_rgba_t *px_prev) {
+	qoi_write_32(bytes, p, QOI_MAGIC);
+	qoi_write_32(bytes, p, desc->width);
+	qoi_write_32(bytes, p, desc->height);
+	bytes[(*p)++] = desc->channels;
+	bytes[(*p)++] = desc->colorspace;
+
+	px_prev->rgba.r = 0;
+	px_prev->rgba.g = 0;
+	px_prev->rgba.b = 0;
+	px_prev->rgba.a = 255;
+	*px = *px_prev;
+}
+
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 	int i, max_size, p=0, run=0;
-	int px_len, px_end, px_pos, channels;
 	unsigned char *bytes;
-	const unsigned char *pixels;
 	qoi_rgba_t px, px_prev;
 
 	if (
@@ -384,99 +475,19 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 		return NULL;
 
 	max_size =
-		desc->width * desc->height * (desc->channels + 1) +
+		desc->width * desc->height * (desc->channels + (desc->channels==4?2:1)) +
 		QOI_HEADER_SIZE + sizeof(qoi_padding);
 
 	if(!(bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
 
-	qoi_write_32(bytes, &p, QOI_MAGIC);
-	qoi_write_32(bytes, &p, desc->width);
-	qoi_write_32(bytes, &p, desc->height);
-	bytes[p++] = desc->channels;
-	bytes[p++] = desc->colorspace;
-
-	pixels = (const unsigned char *)data;
-
-	px_prev.rgba.r = 0;
-	px_prev.rgba.g = 0;
-	px_prev.rgba.b = 0;
-	px_prev.rgba.a = 255;
-	px = px_prev;
-
-	px_len = desc->width * desc->height * desc->channels;
-	px_end = px_len - desc->channels;
-	channels = desc->channels;
-
-	if (channels == 4) {
-		for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
-			px.rgba.a = pixels[px_pos + 3];
-
-			while(px.v == px_prev.v) {
-				++run;
-				if(px_pos == px_end) {
-					for(;run>=30;run-=30)
-						bytes[p++] = 0xFD;
-					if (run)
-						bytes[p++] = QOI_OP_RUN | (run - 1);
-					goto DONE;
-				}
-				px_pos+=4;
-				px.rgba.r = pixels[px_pos + 0];
-				px.rgba.g = pixels[px_pos + 1];
-				px.rgba.b = pixels[px_pos + 2];
-				px.rgba.a = pixels[px_pos + 3];
-			}
-			for(;run>=30;run-=30)
-				bytes[p++] = 0xFD;
-			if (run) {
-				bytes[p++] = QOI_OP_RUN | (run - 1);
-				run = 0;
-			}
-
-			if(px.rgba.a!=px_prev.rgba.a){
-				bytes[p++] = QOI_OP_RGBA;
-				bytes[p++] = px.rgba.a;
-			}
-			RGB_ENC_SCALAR;
-			px_prev = px;
-		}
-	}
-	else {
-		for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
-
-			while(px.v == px_prev.v) {
-				++run;
-				if(px_pos == px_end) {
-					for(;run>=30;run-=30)
-						bytes[p++] = 0xFD;
-					if (run)
-						bytes[p++] = QOI_OP_RUN | (run - 1);
-					goto DONE;
-				}
-				px_pos+=3;
-				px.rgba.r = pixels[px_pos + 0];
-				px.rgba.g = pixels[px_pos + 1];
-				px.rgba.b = pixels[px_pos + 2];
-			}
-			for(;run>=30;run-=30)
-				bytes[p++] = 0xFD;
-			if (run) {
-				bytes[p++] = QOI_OP_RUN | (run - 1);
-				run = 0;
-			}
-			RGB_ENC_SCALAR;
-			px_prev = px;
-		}
-	}
-	DONE:
-
+	qoi_encode_init(desc, bytes, &p, &px, &px_prev);
+	if (desc->channels == 4)
+		qoi_encode_chunk4((const unsigned char *)data, bytes, &p, desc->width * desc->height, &px_prev, &run);
+	else
+		qoi_encode_chunk3((const unsigned char *)data, bytes, &p, desc->width * desc->height, &px_prev, &run);
+	if (run)
+		bytes[p++] = QOI_OP_RUN | (run - 1);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
 		bytes[p++] = qoi_padding[i];
 
