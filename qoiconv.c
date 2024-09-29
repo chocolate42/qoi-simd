@@ -49,6 +49,12 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
+#ifdef ROI
+	if ((STR_ENDS_WITH(argv[1], ".ppm")) && (STR_ENDS_WITH(argv[2], ".roi")))
+		qoi_write_from_ppm(argv[1], argv[2]);
+	else {
+#endif
+
 	void *pixels = NULL;
 	int w, h, channels;
 	if (STR_ENDS_WITH(argv[1], ".png")) {
@@ -96,5 +102,8 @@ int main(int argc, char **argv) {
 	}
 
 	free(pixels);
+#ifdef ROI
+	}
+#endif
 	return 0;
 }
