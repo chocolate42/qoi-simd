@@ -1,7 +1,7 @@
 CC ?= gcc
-CFLAGS_BENCH ?= -std=gnu99 -O3
+CFLAGS_BENCH ?= -std=gnu99 -O3 -llz4 -lzstd
 LFLAGS_BENCH ?= -lpng $(LDFLAGS)
-CFLAGS_CONV ?= -std=c99 -O3
+CFLAGS_CONV ?= -std=c99 -O3 -llz4 -lzstd
 LFLAGS_CONV ?= $(LDFLAGS)
 
 TARGET_BENCH ?= qoibench

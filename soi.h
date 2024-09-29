@@ -502,7 +502,6 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 			}
 
 			RGB_ENC_SCALAR;
-
 			px_prev = px;
 		}
 	}
