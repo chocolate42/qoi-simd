@@ -533,6 +533,9 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	)
 		return NULL;
 
+	if(desc->channels==4 && channels==3)
+		return NULL;
+
 	if (channels == 0)
 		channels = desc->channels;
 
@@ -547,50 +550,91 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	px.rgba.a = 255;
 
 	chunks_len = size - (int)sizeof(qoi_padding);
-	for (px_pos = 0; px_pos < px_len; px_pos += channels) {
-		if (run > 0)
-			run--;
-		else if (p < chunks_len) {
-			OP_RGBA_GOTO:
-			int b1 = bytes[p++];
-			if (b1 == QOI_OP_RGB) {
-				px.rgba.r = bytes[p++];
-				px.rgba.g = bytes[p++];
-				px.rgba.b = bytes[p++];
+	if(desc->channels==4){
+		for (px_pos = 0; px_pos < px_len; px_pos += 4) {
+			if (run > 0)
+				run--;
+			else if (p < chunks_len) {
+				OP_RGBA_GOTO:
+				int b1 = bytes[p++];
+				if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
+					int vg = (b1 & 7) - 4;
+					px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
+				}
+				else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
+					int b2 = bytes[p++];
+					int vg = (b1 & 0x3f) - 32;
+					px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 8 +  (b2       & 0x0f);
+				}
+				else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
+					int b2 = bytes[p++];
+					int b3 = bytes[p++];
+					int vg = (b3 & 0x7f) - 64;
+					px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
+				}
+				else if (b1 == QOI_OP_RGB) {
+					px.rgba.r = bytes[p++];
+					px.rgba.g = bytes[p++];
+					px.rgba.b = bytes[p++];
+				}
+				else if (b1 == QOI_OP_RGBA) {
+					px.rgba.a = bytes[p++];
+					goto OP_RGBA_GOTO;
+				}
+				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+					run = (b1 & 0x1f);
 			}
-			else if (b1 == QOI_OP_RGBA) {
-				px.rgba.a = bytes[p++];
-				goto OP_RGBA_GOTO;
-			}
-			else if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-				int vg = (b1 & 7) - 4;
-				px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-				px.rgba.g += vg;
-				px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-			}
-			else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-				int b2 = bytes[p++];
-				int vg = (b1 & 0x3f) - 32;
-				px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-				px.rgba.g += vg;
-				px.rgba.b += vg - 8 +  (b2       & 0x0f);
-			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-				int b2 = bytes[p++];
-				int b3 = bytes[p++];
-				int vg = (b3 & 0x7f) - 64;
-				px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-				px.rgba.g += vg;
-				px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = (b1 & 0x1f);
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-		if (channels == 4)
+			pixels[px_pos + 0] = px.rgba.r;
+			pixels[px_pos + 1] = px.rgba.g;
+			pixels[px_pos + 2] = px.rgba.b;
 			pixels[px_pos + 3] = px.rgba.a;
+		}
+	}
+	else{
+		for (px_pos = 0; px_pos < px_len; px_pos += 3) {
+			if (run > 0)
+				run--;
+			else if (p < chunks_len) {
+				int b1 = bytes[p++];
+				if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
+					int vg = (b1 & 7) - 4;
+					px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
+				}
+				else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
+					int b2 = bytes[p++];
+					int vg = (b1 & 0x3f) - 32;
+					px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 8 +  (b2       & 0x0f);
+				}
+				else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
+					int b2 = bytes[p++];
+					int b3 = bytes[p++];
+					int vg = (b3 & 0x7f) - 64;
+					px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
+					px.rgba.g += vg;
+					px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
+				}
+				else if (b1 == QOI_OP_RGB) {
+					px.rgba.r = bytes[p++];
+					px.rgba.g = bytes[p++];
+					px.rgba.b = bytes[p++];
+				}
+				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+					run = (b1 & 0x1f);
+			}
+			pixels[px_pos + 0] = px.rgba.r;
+			pixels[px_pos + 1] = px.rgba.g;
+			pixels[px_pos + 2] = px.rgba.b;
+		}
 	}
 
 	return pixels;
