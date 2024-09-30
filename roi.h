@@ -374,7 +374,7 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	}\
 }while(0)
 
-inline void qoi_encode_chunk3(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+void qoi_encode_chunk3(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp, run=*r;
 	qoi_rgba_t px, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
@@ -599,7 +599,10 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
 
-#define CHUNK 1024
+//the number of pixels to process per chunk when chunk processing
+//must be a multiple of 64 for simd alignment
+//65536 chosen by scalar experimentation on Ryzen 7840u
+#define CHUNK 65536
 
 int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f) {
 	int p=0, run=0;
@@ -648,14 +651,13 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f) {
 		return 0;
 	if(maxval>256)//multi-byte not supported
 		return 0;
-	printf("width %u height %u maxval %u\n", width, height, maxval);
 	desc.width=width;
 	desc.height=height;
 	desc.channels=3;
 	desc.colorspace=0;
 
-	in=malloc(CHUNK*3);
-	out=malloc(CHUNK*4);
+	in=QOI_MALLOC(CHUNK*3);
+	out=QOI_MALLOC(CHUNK*4);
 	qoi_encode_init(&desc, out, &p, &px_prev);
 	fwrite(out, 1, p, fo);
 	pixels=width*height;
