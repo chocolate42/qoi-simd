@@ -95,6 +95,16 @@ int main(int argc, char **argv) {
 			.colorspace = QOI_SRGB
 		});
 	}
+	else if (STR_ENDS_WITH(argv[2], ".ppm")) {
+		char header[512];
+		FILE *fo = fopen(argv[2], "wb");
+		int headerlen;
+		headerlen=sprintf(header, "P6 %u %u 255\n", w, h);
+		fwrite(header, 1, headerlen, fo);
+		fwrite(pixels, 1, w*h*3, fo);
+		fclose(fo);
+		encoded=1;
+	}
 
 	if (!encoded) {
 		printf("Couldn't write/encode %s\n", argv[2]);
