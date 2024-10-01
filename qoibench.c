@@ -488,9 +488,7 @@ benchmark_result_t benchmark_image(const char *path) {
 	res.w = w;
 	res.h = h;
 
-
 	// Decoding
-
 	if (!opt_nodecode) {
 		if (!opt_nopng) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LIBPNG].decode_time, {
@@ -508,7 +506,7 @@ benchmark_result_t benchmark_image(const char *path) {
 
 		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].decode_time, {
 			qoi_desc desc;
-			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, 4);
+			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, channels);
 			free(dec_p);
 		});
 
@@ -517,7 +515,7 @@ benchmark_result_t benchmark_image(const char *path) {
 				qoi_desc desc;
 				void *dec_lz4=malloc(encoded_qoi_size);
 				LZ4_decompress_safe(encoded_qoi_lz4, dec_lz4, encoded_qoi_lz4_size, encoded_qoi_size);
-				void *dec_p = qoi_decode(dec_lz4, encoded_qoi_size, &desc, 4);
+				void *dec_p = qoi_decode(dec_lz4, encoded_qoi_size, &desc, channels);
 				free(dec_p);
 				free(dec_lz4);
 			});
@@ -528,7 +526,7 @@ benchmark_result_t benchmark_image(const char *path) {
 				qoi_desc desc;
 				void *dec=malloc(encoded_qoi_size);
 				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd1, encoded_qoi_zstd1_size);
-				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, channels);
 				free(dec_p);
 				free(dec);
 			});
@@ -539,7 +537,7 @@ benchmark_result_t benchmark_image(const char *path) {
 				qoi_desc desc;
 				void *dec=malloc(encoded_qoi_size);
 				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd3, encoded_qoi_zstd3_size);
-				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, channels);
 				free(dec_p);
 				free(dec);
 			});
@@ -550,7 +548,7 @@ benchmark_result_t benchmark_image(const char *path) {
 				qoi_desc desc;
 				void *dec=malloc(encoded_qoi_size);
 				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd9, encoded_qoi_zstd9_size);
-				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, channels);
 				free(dec_p);
 				free(dec);
 			});
@@ -561,13 +559,12 @@ benchmark_result_t benchmark_image(const char *path) {
 				qoi_desc desc;
 				void *dec=malloc(encoded_qoi_size);
 				ZSTD_decompress(dec, encoded_qoi_size, encoded_qoi_zstd19, encoded_qoi_zstd19_size);
-				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, 4);
+				void *dec_p = qoi_decode(dec, encoded_qoi_size, &desc, channels);
 				free(dec_p);
 				free(dec);
 			});
 		}
 	}
-
 
 	// Encoding
 	if (!opt_noencode) {
