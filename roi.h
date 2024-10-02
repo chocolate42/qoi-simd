@@ -538,13 +538,211 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 		px.rgba.b += vg - 128 + b3; \
 	}
 
+#define DEC_INIT_COMMON \
+	qoi_rgba_t px; \
+	int px_len=desc->width*desc->height*channels, px_pos=0; \
+	int p = 0, run = 0; \
+	px.rgba.r = 0; \
+	px.rgba.g = 0; \
+	px.rgba.b = 0; \
+	px.rgba.a = 255;
+
+void dec_in4out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
+		if (run)
+			run--;
+		else{
+			OP_RGBA_GOTO:
+			QOI_DECODE_COMMON
+			else if (b1 == QOI_OP_RGBA) {
+				px.rgba.a = bytes[p++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				run = (b1 & 0x1f);
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+		pixels[px_pos + 3] = px.rgba.a;
+	}
+}
+
+void dec_in4out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
+		if (run)
+			run--;
+		else{
+			OP_RGBA_GOTO:
+			QOI_DECODE_COMMON
+			else if (b1 == QOI_OP_RGBA) {
+				px.rgba.a = bytes[p++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				run = (b1 & 0x1f);
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+	}
+}
+
+void dec_in3out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
+		if (run)
+			run--;
+		else{
+			QOI_DECODE_COMMON
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				run = (b1 & 0x1f);
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+		pixels[px_pos + 3] = px.rgba.a;
+	}
+}
+
+void dec_in3out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
+		if (run)
+			run--;
+		else{
+			QOI_DECODE_COMMON
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				run = (b1 & 0x1f);
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+	}
+}
+
+void dec_in4out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMON
+		else if (b1 == QOI_OP_RGBA) {
+			px.rgba.a = bytes[p++];
+			goto OP_RGBA_GOTO;
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+		pixels[px_pos + 3] = px.rgba.a;
+	}
+}
+
+void dec_in4out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMON
+		else if (b1 == QOI_OP_RGBA) {
+			px.rgba.a = bytes[p++];
+			goto OP_RGBA_GOTO;
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+	}
+}
+
+//these last 2 can't use QOI_DECODE_COMMON
+void dec_in3out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
+		int b1 = bytes[p++];
+		if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
+			int vg = (b1 & 7) - 4;
+			px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
+		}
+		else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
+			int b2 = bytes[p++];
+			int vg = (b1 & 0x3f) - 32;
+			px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 8 +  (b2       & 0x0f);
+		}
+		else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
+			int b2 = bytes[p++];
+			int b3 = bytes[p++];
+			int vg = (b3 & 0x7f) - 64;
+			px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
+		}
+		else {
+			int b2 = bytes[p++];
+			int vg = bytes[p++];
+			vg-=128;
+			int b3 = bytes[p++];
+			px.rgba.r += vg - 128 + b2;
+			px.rgba.g += vg;
+			px.rgba.b += vg - 128 + b3;
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+		pixels[px_pos + 3] = px.rgba.a;
+	}
+}
+
+void dec_in3out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	DEC_INIT_COMMON
+	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
+		int b1 = bytes[p++];
+		if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
+			int vg = (b1 & 7) - 4;
+			px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
+		}
+		else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
+			int b2 = bytes[p++];
+			int vg = (b1 & 0x3f) - 32;
+			px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 8 +  (b2       & 0x0f);
+		}
+		else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
+			int b2 = bytes[p++];
+			int b3 = bytes[p++];
+			int vg = (b3 & 0x7f) - 64;
+			px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
+			px.rgba.g += vg;
+			px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
+		}
+		else {
+			int b2 = bytes[p++];
+			int vg = bytes[p++];
+			vg-=128;
+			int b3 = bytes[p++];
+			px.rgba.r += vg - 128 + b2;
+			px.rgba.g += vg;
+			px.rgba.b += vg - 128 + b3;
+		}
+		pixels[px_pos + 0] = px.rgba.r;
+		pixels[px_pos + 1] = px.rgba.g;
+		pixels[px_pos + 2] = px.rgba.b;
+	}
+}
+
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
+	void (*decode_func)(const unsigned char*, unsigned char*, qoi_desc *, int);
 	const unsigned char *bytes;
 	unsigned int header_magic;
 	unsigned char *pixels;
-	qoi_rgba_t px;
-	int px_len, chunks_len, px_pos;
-	int p = 0, run = 0;
+	int p, px_len;
+	void (*decode_arr[])(const unsigned char*, unsigned char*, qoi_desc *, int)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
 
 	if (
 		data == NULL || desc == NULL ||
@@ -578,62 +776,9 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	if (!pixels)
 		return NULL;
 
-	px.rgba.r = 0;
-	px.rgba.g = 0;
-	px.rgba.b = 0;
-	px.rgba.a = 255;
+	decode_func=decode_arr[(((desc->colorspace>>1)&1)?4:0)+((desc->channels==3)?2:0)+((channels==3)?1:0)];
+	decode_func(bytes+p, pixels, desc, channels);
 
-	chunks_len = size - (int)sizeof(qoi_padding);
-	if(desc->channels==4){//no shortcuts
-		for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-			if (run > 0)
-				run--;
-			else if (p < chunks_len) {
-				OP_RGBA_GOTO:
-				QOI_DECODE_COMMON
-				else if (b1 == QOI_OP_RGBA) {
-					px.rgba.a = bytes[p++];
-					goto OP_RGBA_GOTO;
-				}
-				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-					run = (b1 & 0x1f);
-			}
-			pixels[px_pos + 0] = px.rgba.r;
-			pixels[px_pos + 1] = px.rgba.g;
-			pixels[px_pos + 2] = px.rgba.b;
-			if(channels==4)
-				pixels[px_pos + 3] = px.rgba.a;
-		}
-	}
-	else if(channels==3){//alpha shortcut, rgb out
-		for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-			if (run > 0)
-				run--;
-			else if (p < chunks_len) {
-				QOI_DECODE_COMMON
-				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-					run = (b1 & 0x1f);
-			}
-			pixels[px_pos + 0] = px.rgba.r;
-			pixels[px_pos + 1] = px.rgba.g;
-			pixels[px_pos + 2] = px.rgba.b;
-		}
-	}
-	else{//alpha shortcut, rgba out
-		for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-			if (run > 0)
-				run--;
-			else if (p < chunks_len) {
-				QOI_DECODE_COMMON
-				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-					run = (b1 & 0x1f);
-			}
-			pixels[px_pos + 0] = px.rgba.r;
-			pixels[px_pos + 1] = px.rgba.g;
-			pixels[px_pos + 2] = px.rgba.b;
-			pixels[px_pos + 3] = px.rgba.a;
-		}
-	}
 	return pixels;
 }
 
