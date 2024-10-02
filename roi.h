@@ -438,6 +438,39 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 	return bytes;
 }
 
+#define QOI_DECODE_COMMON \
+	int b1 = bytes[p++]; \
+	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
+		int vg = (b1 & 7) - 4; \
+		px.rgba.r += vg - 2 + ((b1 >> 5) & 3); \
+		px.rgba.g += vg; \
+		px.rgba.b += vg - 2 + ((b1 >> 3) & 3); \
+	} \
+	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
+		int b2 = bytes[p++]; \
+		int vg = (b1 & 0x3f) - 32; \
+		px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f); \
+		px.rgba.g += vg; \
+		px.rgba.b += vg - 8 +  (b2       & 0x0f); \
+	} \
+	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
+		int b2 = bytes[p++]; \
+		int b3 = bytes[p++]; \
+		int vg = (b3 & 0x7f) - 64; \
+		px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7); \
+		px.rgba.g += vg; \
+		px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6); \
+	} \
+	else if (b1 == QOI_OP_RGB) { \
+		int b2 = bytes[p++]; \
+		int vg = bytes[p++]; \
+		vg-=128; \
+		int b3 = bytes[p++]; \
+		px.rgba.r += vg - 128 + b2; \
+		px.rgba.g += vg; \
+		px.rgba.b += vg - 128 + b3; \
+	}
+
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	const unsigned char *bytes;
 	unsigned int header_magic;
@@ -490,37 +523,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 				run--;
 			else if (p < chunks_len) {
 				OP_RGBA_GOTO:
-				int b1 = bytes[p++];
-				if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-					int vg = (b1 & 7) - 4;
-					px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-				}
-				else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-					int b2 = bytes[p++];
-					int vg = (b1 & 0x3f) - 32;
-					px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 8 +  (b2       & 0x0f);
-				}
-				else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-					int b2 = bytes[p++];
-					int b3 = bytes[p++];
-					int vg = (b3 & 0x7f) - 64;
-					px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-				}
-				else if (b1 == QOI_OP_RGB) {
-					int b2 = bytes[p++];
-					int vg = bytes[p++];
-					vg-=128;
-					int b3 = bytes[p++];
-					px.rgba.r += vg - 128 + b2;
-					px.rgba.g += vg;
-					px.rgba.b += vg - 128 + b3;
-				}
+				QOI_DECODE_COMMON
 				else if (b1 == QOI_OP_RGBA) {
 					px.rgba.a = bytes[p++];
 					goto OP_RGBA_GOTO;
@@ -540,37 +543,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 			if (run > 0)
 				run--;
 			else if (p < chunks_len) {
-				int b1 = bytes[p++];
-				if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-					int vg = (b1 & 7) - 4;
-					px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-				}
-				else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-					int b2 = bytes[p++];
-					int vg = (b1 & 0x3f) - 32;
-					px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 8 +  (b2       & 0x0f);
-				}
-				else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-					int b2 = bytes[p++];
-					int b3 = bytes[p++];
-					int vg = (b3 & 0x7f) - 64;
-					px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-				}
-				else if (b1 == QOI_OP_RGB) {
-					int b2 = bytes[p++];
-					int vg = bytes[p++];
-					vg-=128;
-					int b3 = bytes[p++];
-					px.rgba.r += vg -128 + b2;
-					px.rgba.g += vg;
-					px.rgba.b += vg -128 + b3;
-				}
+				QOI_DECODE_COMMON
 				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 					run = (b1 & 0x1f);
 			}
@@ -584,37 +557,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 			if (run > 0)
 				run--;
 			else if (p < chunks_len) {
-				int b1 = bytes[p++];
-				if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-					int vg = (b1 & 7) - 4;
-					px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-				}
-				else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-					int b2 = bytes[p++];
-					int vg = (b1 & 0x3f) - 32;
-					px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 8 +  (b2       & 0x0f);
-				}
-				else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-					int b2 = bytes[p++];
-					int b3 = bytes[p++];
-					int vg = (b3 & 0x7f) - 64;
-					px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-					px.rgba.g += vg;
-					px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-				}
-				else if (b1 == QOI_OP_RGB) {
-					int b2 = bytes[p++];
-					int vg = bytes[p++];
-					vg-=128;
-					int b3 = bytes[p++];
-					px.rgba.r += vg -128 + b2;
-					px.rgba.g += vg;
-					px.rgba.b += vg -128 + b3;
-				}
+				QOI_DECODE_COMMON
 				else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 					run = (b1 & 0x1f);
 			}
