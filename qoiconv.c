@@ -41,63 +41,72 @@ Compile with:
 #define STR_ENDS_WITH(S, E) (strcmp(S + strlen(S) - (sizeof(E)-1), E) == 0)
 
 int main(int argc, char **argv) {
-	if (argc < 3) {
-		puts("Usage: "EXT_STR"conv <infile> <outfile>");
+	int norle=0;
+	if (argc < 3 || argc > 4) {
+		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
+		puts("[ops]");
+		puts(" -norle : Disable RLE if possible");
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
 		exit(1);
 	}
 
+	if(argc==4 && strcmp(argv[1], "-norle")==0)
+		norle=1;
+
+	//disable norle for everything that doesn't support it
+#ifndef ROI
+	norle=0;
+#endif
+
 #ifdef ROI
-	if ((STR_ENDS_WITH(argv[1], ".ppm")) && (STR_ENDS_WITH(argv[2], ".roi")))
-		qoi_write_from_ppm(argv[1], argv[2]);
+	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
+		qoi_write_from_ppm(argv[argc-2], argv[argc-1], norle);
 	else {
 #endif
 
 	void *pixels = NULL;
 	int w, h, channels;
-	if (STR_ENDS_WITH(argv[1], ".png")) {
-		if(!stbi_info(argv[1], &w, &h, &channels)) {
-			printf("Couldn't read header %s\n", argv[1]);
+	if (STR_ENDS_WITH(argv[argc-2], ".png")) {
+		if(!stbi_info(argv[argc-2], &w, &h, &channels)) {
+			printf("Couldn't read header %s\n", argv[argc-2]);
 			exit(1);
 		}
 
-		// Force all odd encodings to be RGBA
-		if(channels != 3) {
+		if(channels != 3)// Force all odd encodings to be RGBA
 			channels = 4;
-		}
 
-		pixels = (void *)stbi_load(argv[1], &w, &h, NULL, channels);
+		pixels = (void *)stbi_load(argv[argc-2], &w, &h, NULL, channels);
 	}
-	else if (STR_ENDS_WITH(argv[1], "."EXT_STR)) {
+	else if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) {
 		qoi_desc desc;
-		pixels = qoi_read(argv[1], &desc, 0);
+		pixels = qoi_read(argv[argc-2], &desc, 0);
 		channels = desc.channels;
 		w = desc.width;
 		h = desc.height;
 	}
 
 	if (pixels == NULL) {
-		printf("Couldn't load/decode %s\n", argv[1]);
+		printf("Couldn't load/decode %s\n", argv[argc-2]);
 		exit(1);
 	}
 
 	int encoded = 0;
-	if (STR_ENDS_WITH(argv[2], ".png")) {
-		encoded = stbi_write_png(argv[2], w, h, channels, pixels, 0);
+	if (STR_ENDS_WITH(argv[argc-1], ".png")) {
+		encoded = stbi_write_png(argv[argc-1], w, h, channels, pixels, 0);
 	}
-	else if (STR_ENDS_WITH(argv[2], "."EXT_STR)) {
-		encoded = qoi_write(argv[2], pixels, &(qoi_desc){
+	else if (STR_ENDS_WITH(argv[argc-1], "."EXT_STR)) {
+		encoded = qoi_write(argv[argc-1], pixels, &(qoi_desc){
 			.width = w,
 			.height = h, 
 			.channels = channels,
-			.colorspace = QOI_SRGB
+			.colorspace = (norle<<1)|QOI_SRGB
 		});
 	}
-	else if (STR_ENDS_WITH(argv[2], ".ppm")) {
+	else if (STR_ENDS_WITH(argv[argc-1], ".ppm")) {
 		char header[512];
-		FILE *fo = fopen(argv[2], "wb");
+		FILE *fo = fopen(argv[argc-1], "wb");
 		int headerlen;
 		headerlen=sprintf(header, "P6 %u %u 255\n", w, h);
 		fwrite(header, 1, headerlen, fo);
@@ -107,7 +116,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (!encoded) {
-		printf("Couldn't write/encode %s\n", argv[2]);
+		printf("Couldn't write/encode %s\n", argv[argc-1]);
 		exit(1);
 	}
 
