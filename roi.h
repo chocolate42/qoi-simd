@@ -230,16 +230,18 @@ Implementation */
 	#define QOI_ZEROARR(a) memset((a),0,sizeof(a))
 #endif
 
-#define QOI_OP_LUMA232 0x00 /* 0xxxxxxx */
-#define QOI_OP_LUMA464 0x80 /* 10xxxxxx */
-#define QOI_OP_LUMA777 0xc0 /* 110xxxxx */
-#define QOI_OP_RUN     0xe0 /* 111xxxxx */
-#define QOI_OP_RGB     0xfe /* 11111110 */
+#define QOI_OP_LUMA232 0x00 /* xxxxxxx0 */
+#define QOI_OP_LUMA464 0x01 /* xxxxxx01 */
+#define QOI_OP_LUMA777 0x03 /* xxxxx011 */
+#define QOI_OP_RUN     0x07 /* xxxxx111 */
+#define QOI_OP_RGB     0xf7 /* 11110111 */
 #define QOI_OP_RGBA    0xff /* 11111111 */
 
-#define QOI_MASK_1     0x80 /* 10000000 */
-#define QOI_MASK_2     0xc0 /* 11000000 */
-#define QOI_MASK_3     0xe0 /* 11100000 */
+#define QOI_OP_RUN30   0xef /* 11101111 */
+
+#define QOI_MASK_1     0x01 /* 00000001 */
+#define QOI_MASK_2     0x03 /* 00000011 */
+#define QOI_MASK_3     0x07 /* 00000111 */
 
 #define QOI_MAGIC \
 	(((unsigned int)'r') << 24 | ((unsigned int)'o') << 16 | \
@@ -279,6 +281,28 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	return a << 24 | b << 16 | c << 8 | d;
 }
 
+static inline uint32_t peek_u32le(const uint8_t* p) {
+	return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) | ((uint32_t)(p[3]) << 24);
+}
+
+static inline void poke_u16le(uint8_t* b, int *p, uint16_t x) {
+	b[(*p)++] = (uint8_t)(x >> 0);
+	b[(*p)++] = (uint8_t)(x >> 8);
+}
+
+static inline void poke_u24le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = (uint8_t)(x >> 0);
+	b[(*p)++] = (uint8_t)(x >> 8);
+	b[(*p)++] = (uint8_t)(x >> 16);
+}
+
+static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = (uint8_t)(x >> 0);
+	b[(*p)++] = (uint8_t)(x >> 8);
+	b[(*p)++] = (uint8_t)(x >> 16);
+	b[(*p)++] = (uint8_t)(x >> 24);
+}
+
 #define RGB_ENC_SCALAR do{\
 	signed char vr = px.rgba.r - px_prev.rgba.r;\
 	signed char vg = px.rgba.g - px_prev.rgba.g;\
@@ -290,19 +314,13 @@ static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
 	unsigned char ab = (vg_b<0)?(-vg_b)-1:vg_b;\
 	unsigned char arb = ar|ab;\
 	if ( arb < 2 && ag  < 4 ) {\
-		bytes[p++] = QOI_OP_LUMA232 | ((vg_r + 2) << 5) | ((vg_b + 2) << 3) | (vg + 4);\
+		bytes[p++]=QOI_OP_LUMA232|((vg_b+2)<<6)|((vg_r+2)<<4)|((vg+4)<<1);\
 	} else if ( arb <  8 && ag  < 32 ) {\
-		bytes[p++] = QOI_OP_LUMA464    | (vg   + 32);\
-		bytes[p++] = ((vg_r + 8) << 4) | (vg_b +  8);\
+		poke_u16le(bytes, &p, QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2));\
 	} else if ( (arb|ag) < 64 ) {\
-		bytes[p++] = QOI_OP_LUMA777     | ((vg_b + 64)>>2);\
-		bytes[p++] = (((vg_b+64)&3)<<6) | ((vg_r + 64)>>1);\
-		bytes[p++] = (((vg_r+64)&1)<<7) | vg+64;\
+		poke_u24le(bytes, &p, QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3));\
 	} else {\
-		bytes[p++] = QOI_OP_RGB;\
-		bytes[p++] = vg_r+128;\
-		bytes[p++] = vg+128;\
-		bytes[p++] = vg_b+128;\
+		poke_u32le(bytes, &p, QOI_OP_RGB|((vg_b+128)<<24)|((vg_r+128)<<16)|((vg+128)<<8));\
 	}\
 }while(0)
 
@@ -325,7 +343,7 @@ void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes,
 			++run;
 			if(px_pos == px_end){
 				for(;run>=30;run-=30)
-					bytes[p++] = 0xFD;
+					bytes[p++] = QOI_OP_RUN30;
 				goto DONE;
 			}
 			px_pos+=3;
@@ -334,9 +352,9 @@ void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes,
 			px.rgba.b = pixels[px_pos + 2];
 		}
 		for(;run>=30;run-=30)
-			bytes[p++] = 0xFD;
+			bytes[p++] = QOI_OP_RUN30;
 		if (run) {
-			bytes[p++] = QOI_OP_RUN | (run - 1);
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
 			run = 0;
 		}
 		RGB_ENC_SCALAR;
@@ -378,7 +396,7 @@ void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes,
 			++run;
 			if(px_pos == px_end) {
 				for(;run>=30;run-=30)
-					bytes[p++] = 0xFD;
+					bytes[p++] = QOI_OP_RUN30;
 				goto DONE;
 			}
 			px_pos+=4;
@@ -388,9 +406,9 @@ void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes,
 			px.rgba.a = pixels[px_pos + 3];
 		}
 		for(;run>=30;run-=30)
-			bytes[p++] = 0xFD;
+			bytes[p++] = QOI_OP_RUN30;
 		if (run) {
-			bytes[p++] = QOI_OP_RUN | (run - 1);
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
 			run = 0;
 		}
 		if(px.rgba.a!=px_prev.rgba.a){
@@ -426,7 +444,7 @@ void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *
 	*pp=p;
 }
 
-void *qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev) {
+void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
 	qoi_write_32(bytes, p, desc->height);
@@ -497,7 +515,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 			bytes, &p, ((desc->width * desc->height)%CHUNK), &px_prev, &run);
 
 	if (run)
-		bytes[p++] = QOI_OP_RUN | (run - 1);
+		bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
 		bytes[p++] = qoi_padding[i];
 
@@ -508,46 +526,60 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 #define QOI_DECODE_COMMON \
 	int b1 = bytes[p++]; \
 	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
-		int vg = (b1 & 7) - 4; \
-		px.rgba.r += vg - 2 + ((b1 >> 5) & 3); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg - 2 + ((b1 >> 3) & 3); \
+			int vg = ((b1>>1)&7) - 4; \
+			px.rgba.r += vg -2+ ((b1 >> 4) & 3); \
+			px.rgba.g += vg; \
+			px.rgba.b += vg -2+ ((b1 >> 6) & 3); \
 	} \
 	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
-		int b2 = bytes[p++]; \
-		int vg = (b1 & 0x3f) - 32; \
-		px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg - 8 +  (b2       & 0x0f); \
+			int b2=bytes[p++]; \
+			int vg = ((b1>>2)&63) - 32; \
+			px.rgba.r += vg -8+ ((b2     ) & 0x0f); \
+			px.rgba.g += vg; \
+			px.rgba.b += vg -8+ ((b2 >>4) & 0x0f); \
 	} \
 	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
-		int b2 = bytes[p++]; \
-		int b3 = bytes[p++]; \
-		int vg = (b3 & 0x7f) - 64; \
-		px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6); \
-	} \
+			int b2=bytes[p++]; \
+			int b3=bytes[p++]; \
+			int vg = (((b2&3)<<5)|((b1>>3)&31))-64; \
+			px.rgba.r += vg -64 + (((b3&1)<<6)|((b2>>2)&63)); \
+			px.rgba.g += vg; \
+			px.rgba.b += vg -64 + ((b3>>1)&127); \
+	}
+
+#define QOI_DECODE_COMMON2A \
 	else if (b1 == QOI_OP_RGB) { \
-		int b2 = bytes[p++]; \
-		int vg = bytes[p++]; \
-		vg-=128; \
-		int b3 = bytes[p++]; \
-		px.rgba.r += vg - 128 + b2; \
-		px.rgba.g += vg; \
-		px.rgba.b += vg - 128 + b3; \
+			int b2=bytes[p++]; \
+			int b3=bytes[p++]; \
+			int b4=bytes[p++]; \
+			int vg = b2-128; \
+			px.rgba.r += vg -128+ b3; \
+			px.rgba.g += vg; \
+			px.rgba.b += vg -128+ b4; \
+	}
+
+#define QOI_DECODE_COMMON2B \
+	else { \
+			int b2=bytes[p++]; \
+			int b3=bytes[p++]; \
+			int b4=bytes[p++]; \
+			int vg = b2-128; \
+			px.rgba.r += vg -128+ b3; \
+			px.rgba.g += vg; \
+			px.rgba.b += vg -128+ b4; \
 	}
 
 #define DEC_INIT_COMMON \
 	qoi_rgba_t px; \
 	int px_len=desc->width*desc->height*channels, px_pos=0; \
-	int p = 0, run = 0; \
+	int p = 0; \
 	px.rgba.r = 0; \
 	px.rgba.g = 0; \
 	px.rgba.b = 0; \
 	px.rgba.a = 255;
 
 void dec_in4out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	int run=0;
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
 		if (run)
@@ -555,12 +587,13 @@ void dec_in4out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *de
 		else{
 			OP_RGBA_GOTO:
 			QOI_DECODE_COMMON
+			QOI_DECODE_COMMON2A
 			else if (b1 == QOI_OP_RGBA) {
 				px.rgba.a = bytes[p++];
 				goto OP_RGBA_GOTO;
 			}
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = (b1 & 0x1f);
+				run = ((b1>>3) & 0x1f);
 		}
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
@@ -570,6 +603,7 @@ void dec_in4out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *de
 }
 
 void dec_in4out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	int run=0;
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
 		if (run)
@@ -577,12 +611,13 @@ void dec_in4out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *de
 		else{
 			OP_RGBA_GOTO:
 			QOI_DECODE_COMMON
+			QOI_DECODE_COMMON2A
 			else if (b1 == QOI_OP_RGBA) {
 				px.rgba.a = bytes[p++];
 				goto OP_RGBA_GOTO;
 			}
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = (b1 & 0x1f);
+				run = ((b1>>3) & 0x1f);
 		}
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
@@ -591,14 +626,16 @@ void dec_in4out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *de
 }
 
 void dec_in3out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	int run=0;
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
 		if (run)
 			run--;
 		else{
 			QOI_DECODE_COMMON
+			QOI_DECODE_COMMON2A
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = (b1 & 0x1f);
+				run = ((b1>>3) & 0x1f);
 		}
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
@@ -608,14 +645,16 @@ void dec_in3out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *de
 }
 
 void dec_in3out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
+	int run=0;
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
 		if (run)
 			run--;
 		else{
 			QOI_DECODE_COMMON
+			QOI_DECODE_COMMON2A
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = (b1 & 0x1f);
+				run = ((b1>>3) & 0x1f);
 		}
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
@@ -628,6 +667,7 @@ void dec_in4out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_de
 	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
 		OP_RGBA_GOTO:
 		QOI_DECODE_COMMON
+		QOI_DECODE_COMMON2A
 		else if (b1 == QOI_OP_RGBA) {
 			px.rgba.a = bytes[p++];
 			goto OP_RGBA_GOTO;
@@ -644,6 +684,7 @@ void dec_in4out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_de
 	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
 		OP_RGBA_GOTO:
 		QOI_DECODE_COMMON
+		QOI_DECODE_COMMON2A
 		else if (b1 == QOI_OP_RGBA) {
 			px.rgba.a = bytes[p++];
 			goto OP_RGBA_GOTO;
@@ -658,37 +699,8 @@ void dec_in4out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_de
 void dec_in3out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-		int b1 = bytes[p++];
-		if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-			int vg = (b1 & 7) - 4;
-			px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-		}
-		else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-			int b2 = bytes[p++];
-			int vg = (b1 & 0x3f) - 32;
-			px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 8 +  (b2       & 0x0f);
-		}
-		else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-			int b2 = bytes[p++];
-			int b3 = bytes[p++];
-			int vg = (b3 & 0x7f) - 64;
-			px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-		}
-		else {
-			int b2 = bytes[p++];
-			int vg = bytes[p++];
-			vg-=128;
-			int b3 = bytes[p++];
-			px.rgba.r += vg - 128 + b2;
-			px.rgba.g += vg;
-			px.rgba.b += vg - 128 + b3;
-		}
+		QOI_DECODE_COMMON
+		QOI_DECODE_COMMON2B
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
 		pixels[px_pos + 2] = px.rgba.b;
@@ -699,37 +711,8 @@ void dec_in3out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_de
 void dec_in3out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
 	DEC_INIT_COMMON
 	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-		int b1 = bytes[p++];
-		if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) {
-			int vg = (b1 & 7) - 4;
-			px.rgba.r += vg - 2 + ((b1 >> 5) & 3);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 2 + ((b1 >> 3) & 3);
-		}
-		else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) {
-			int b2 = bytes[p++];
-			int vg = (b1 & 0x3f) - 32;
-			px.rgba.r += vg - 8 + ((b2 >> 4) & 0x0f);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 8 +  (b2       & 0x0f);
-		}
-		else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) {
-			int b2 = bytes[p++];
-			int b3 = bytes[p++];
-			int vg = (b3 & 0x7f) - 64;
-			px.rgba.r += vg - 64 + ((b2 & 0x3f)<<1) + (b3>>7);
-			px.rgba.g += vg;
-			px.rgba.b += vg - 64 + ((b1 & 0x1f)<<2) + (b2>>6);
-		}
-		else {
-			int b2 = bytes[p++];
-			int vg = bytes[p++];
-			vg-=128;
-			int b3 = bytes[p++];
-			px.rgba.r += vg - 128 + b2;
-			px.rgba.g += vg;
-			px.rgba.b += vg - 128 + b3;
-		}
+		QOI_DECODE_COMMON
+		QOI_DECODE_COMMON2B
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
 		pixels[px_pos + 2] = px.rgba.b;
@@ -741,7 +724,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	const unsigned char *bytes;
 	unsigned int header_magic;
 	unsigned char *pixels;
-	int p, px_len;
+	int p=0, px_len;
 	void (*decode_arr[])(const unsigned char*, unsigned char*, qoi_desc *, int)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
 
 	if (
