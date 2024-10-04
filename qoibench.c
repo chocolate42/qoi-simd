@@ -415,11 +415,11 @@ void benchmark_print_result(benchmark_result_t res) {
 benchmark_result_t benchmark_image(const char *path) {
 	int encoded_png_size;
 	int encoded_qoi_size;
-	int encoded_qoi_lz4_size;
-	int encoded_qoi_zstd1_size;
-	int encoded_qoi_zstd3_size;
-	int encoded_qoi_zstd9_size;
-	int encoded_qoi_zstd19_size;
+	int encoded_qoi_lz4_size=0;
+	int encoded_qoi_zstd1_size=0;
+	int encoded_qoi_zstd3_size=0;
+	int encoded_qoi_zstd9_size=0;
+	int encoded_qoi_zstd19_size=0;
 	int w;
 	int h;
 	int channels;
