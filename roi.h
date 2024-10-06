@@ -293,7 +293,11 @@ static inline uint32_t peek_u32le(const uint8_t* p) {
 	return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) | ((uint32_t)(p[3]) << 24);
 }
 
-static inline void poke_u16le(uint8_t* b, int *p, uint16_t x) {
+static inline void poke_u8le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = (uint8_t)(x >> 0);
+}
+
+static inline void poke_u16le(uint8_t* b, int *p, uint32_t x) {
 	b[(*p)++] = (uint8_t)(x >> 0);
 	b[(*p)++] = (uint8_t)(x >> 8);
 }
@@ -302,6 +306,13 @@ static inline void poke_u24le(uint8_t* b, int *p, uint32_t x) {
 	b[(*p)++] = (uint8_t)(x >> 0);
 	b[(*p)++] = (uint8_t)(x >> 8);
 	b[(*p)++] = (uint8_t)(x >> 16);
+}
+
+static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = (uint8_t)(x >> 0);
+	b[(*p)++] = (uint8_t)(x >> 8);
+	b[(*p)++] = (uint8_t)(x >> 16);
+	b[(*p)++] = (uint8_t)(x >> 24);
 }
 
 #define RGB_ENC_SCALAR do{\
@@ -843,25 +854,25 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 #define QOI_DECODE_COMMON \
 	int b1 = bytes[p++]; \
 	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
-		int vg = ((b1>>1)&7) - 4; \
-		px.rgba.r += vg -2+ ((b1 >> 4) & 3); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg -2+ ((b1 >> 6) & 3); \
+		int vg = ((b1>>1)&7) - 6; \
+		px.rgba.r += vg + ((b1 >> 4) & 3); \
+		px.rgba.g += vg + 2; \
+		px.rgba.b += vg + ((b1 >> 6) & 3); \
 	} \
 	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
 		int b2=bytes[p++]; \
-		int vg = ((b1>>2)&63) - 32; \
-		px.rgba.r += vg -8+ ((b2     ) & 0x0f); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg -8+ ((b2 >>4) & 0x0f); \
+		int vg = ((b1>>2)&63) - 40; \
+		px.rgba.r += vg + ((b2     ) & 0x0f); \
+		px.rgba.g += vg + 8; \
+		px.rgba.b += vg + ((b2 >>4) & 0x0f); \
 	} \
 	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
 		int b2=bytes[p++]; \
 		int b3=bytes[p++]; \
-		int vg = (((b2&3)<<5)|((b1>>3)&31))-64; \
-		px.rgba.r += vg -64 + (((b3&1)<<6)|((b2>>2)&63)); \
-		px.rgba.g += vg; \
-		px.rgba.b += vg -64 + ((b3>>1)&127); \
+		int vg = (((b2&3)<<5)|((b1>>3)&31))-128; \
+		px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
+		px.rgba.g += vg + 64; \
+		px.rgba.b += vg + ((b3>>1)&127); \
 	}
 
 #define QOI_DECODE_COMMONA_2 \
