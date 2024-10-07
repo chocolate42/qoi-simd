@@ -42,27 +42,23 @@ Compile with:
 
 int main(int argc, char **argv) {
 	int norle=0;
+	options opt={0};
 	if (argc < 3 || argc > 4) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
-		puts(" -norle : Disable RLE if possible");
+		puts(" -rle : Enable RLE (disabled by default)");
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
 		exit(1);
 	}
 
-	if(argc==4 && strcmp(argv[1], "-norle")==0)
-		norle=1;
-
-	//disable norle for everything that doesn't support it
-#ifndef ROI
-	norle=0;
-#endif
+	if(argc==4 && strcmp(argv[1], "-rle")==0)
+		opt.rle=1;
 
 #ifdef ROI
 	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
-		qoi_write_from_ppm(argv[argc-2], argv[argc-1], norle);
+		qoi_write_from_ppm(argv[argc-2], argv[argc-1], &opt);
 	else {
 #endif
 
@@ -102,7 +98,7 @@ int main(int argc, char **argv) {
 			.height = h, 
 			.channels = channels,
 			.colorspace = (norle<<1)|QOI_SRGB
-		});
+		}, &opt);
 	}
 	else if (STR_ENDS_WITH(argv[argc-1], ".ppm")) {
 		char header[512];

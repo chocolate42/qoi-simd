@@ -157,6 +157,12 @@ typedef struct {
 	unsigned char colorspace;
 } qoi_desc;
 
+enum codepath {best, scalar, sse};
+typedef struct{
+	unsigned char rle;
+	enum codepath path;
+} options;
+
 #ifndef QOI_NO_STDIO
 
 /* Encode raw RGB or RGBA pixels into a QOI image and write it to the file
@@ -166,14 +172,14 @@ number of channels (3 = RGB, 4 = RGBA) and the colorspace.
 The function returns 0 on failure (invalid parameters, or fopen or malloc
 failed) or the number of bytes written on success. */
 
-int qoi_write(const char *filename, const void *data, const qoi_desc *desc);
+int qoi_write(const char *filename, const void *data, const qoi_desc *desc, const options *opt);
 
 /* Encode directly from a PPM file to a QOI file
 
 The function returns 0 on failure (invalid parameters, or fopen or malloc
 failed) or 1 on success. */
 
-int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle);
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt);
 
 /* Read and decode a QOI image from the file system. If channels is 0, the
 number of channels from the file header is used. If channels is 3 or 4 the
@@ -197,7 +203,7 @@ is set to the size in bytes of the encoded data.
 
 The returned qoi data should be free()d after use. */
 
-void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len);
+void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt);
 
 /* Decode a QOI image from memory.
 
@@ -339,6 +345,121 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	}\
 }while(0)
 
+void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	int run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
+	px.rgba.a=255;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end){
+				for(;run>=30;run-=30)
+					bytes[p++] = QOI_OP_RUN30;
+				goto DONE;
+			}
+			px_pos+=3;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = QOI_OP_RUN30;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
+			run = 0;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
+	px.rgba.a=255;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	*pixel_prev=px_prev;
+	*pp=p;
+}
+
+void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp, run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		px.rgba.a = pixels[px_pos + 3];
+
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end) {
+				for(;run>=30;run-=30)
+					bytes[p++] = QOI_OP_RUN30;
+				goto DONE;
+			}
+			px_pos+=4;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+			px.rgba.a = pixels[px_pos + 3];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = QOI_OP_RUN30;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
+			run = 0;
+		}
+		if(px.rgba.a!=px_prev.rgba.a){
+			bytes[p++] = QOI_OP_RGBA;
+			bytes[p++] = px.rgba.a;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		px.rgba.a = pixels[px_pos + 3];
+		if(px.rgba.a!=px_prev.rgba.a){
+			bytes[p++] = QOI_OP_RGBA;
+			bytes[p++] = px.rgba.a;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	*pixel_prev=px_prev;
+	*pp=p;
+}
+
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
 #define LOAD16(raw, diff, prev, offset) do{ \
@@ -405,7 +526,7 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	res3=_mm_or_si128(working3, res3); \
 }while(0)
 
-void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
+void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
 	unsigned char prevdump[16];
 	const unsigned char writer_lut[4096] = {//shuffle used bytes in output vector to the left ready for writing
 		0,4,8,12,0,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,0,0,0,0,0,0,0,0,0,
@@ -655,178 +776,65 @@ void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, in
 	pixel_prev->rgba.b=prevdump[15];
 	*pp=p;
 }
+#else
+	//not compiled with QOI_SSE, replace implemented sse functions with scalar placeholders
+	void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+		qoi_encode_chunk3_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+	}
 #endif
 
-void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp;
-	int run=*r;
-	qoi_rgba_t px, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
-	px.rgba.a=255;
-	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		while(px.v == px_prev.v) {
-			++run;
-			if(px_pos == px_end){
-				for(;run>=30;run-=30)
-					bytes[p++] = QOI_OP_RUN30;
-				goto DONE;
-			}
-			px_pos+=3;
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
-		}
-		for(;run>=30;run-=30)
-			bytes[p++] = QOI_OP_RUN30;
-		if (run) {
-			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
-			run = 0;
-		}
-		RGB_ENC_SCALAR;
-		px_prev = px;
+	//implement missing sse functions TODO
+	void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+		qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 	}
-	DONE:
-	*pixel_prev=px_prev;
-	*r=run;
-	*pp=p;
-}
-
-void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp;
-	qoi_rgba_t px, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
-	px.rgba.a=255;
-	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		RGB_ENC_SCALAR;
-		px_prev = px;
+	void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+		qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 	}
-	*pixel_prev=px_prev;
-	*pp=p;
-}
-
-void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp, run=*r;
-	qoi_rgba_t px, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
-	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		px.rgba.a = pixels[px_pos + 3];
-
-		while(px.v == px_prev.v) {
-			++run;
-			if(px_pos == px_end) {
-				for(;run>=30;run-=30)
-					bytes[p++] = QOI_OP_RUN30;
-				goto DONE;
-			}
-			px_pos+=4;
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
-			px.rgba.a = pixels[px_pos + 3];
-		}
-		for(;run>=30;run-=30)
-			bytes[p++] = QOI_OP_RUN30;
-		if (run) {
-			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
-			run = 0;
-		}
-		if(px.rgba.a!=px_prev.rgba.a){
-			bytes[p++] = QOI_OP_RGBA;
-			bytes[p++] = px.rgba.a;
-		}
-		RGB_ENC_SCALAR;
-		px_prev = px;
+	void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+		qoi_encode_chunk4_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 	}
-	DONE:
-	*pixel_prev=px_prev;
-	*r=run;
-	*pp=p;
-}
 
-void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp;
-	qoi_rgba_t px, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
-	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		px.rgba.a = pixels[px_pos + 3];
-		if(px.rgba.a!=px_prev.rgba.a){
-			bytes[p++] = QOI_OP_RGBA;
-			bytes[p++] = px.rgba.a;
-		}
-		RGB_ENC_SCALAR;
-		px_prev = px;
-	}
-	*pixel_prev=px_prev;
-	*pp=p;
-}
-
-void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev) {
+void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev, const options *opt) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
 	qoi_write_32(bytes, p, desc->height);
 	bytes[(*p)++] = desc->channels;
+#ifdef ROI
+	bytes[(*p)++] = (opt->rle==0?2:0)+desc->colorspace;
+#else
 	bytes[(*p)++] = desc->colorspace;
-
+#endif
 	px_prev->rgba.r = 0;
 	px_prev->rgba.g = 0;
 	px_prev->rgba.b = 0;
 	px_prev->rgba.a = 255;
 }
 
-void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
-	int i, max_size, norle=(desc->colorspace>>1)&1, p=0, run=0;
+	//pointers to optimised encode functions
+	//indexed with ((channels-3)*6) | (codepath<<1) | rle
+void (*enc_chunk_arr[])(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*)={
+	qoi_encode_chunk3_sse_norle, qoi_encode_chunk3_sse, qoi_encode_chunk3_scalar_norle, qoi_encode_chunk3_scalar, qoi_encode_chunk3_sse_norle, qoi_encode_chunk3_sse,
+	qoi_encode_chunk4_sse_norle, qoi_encode_chunk4_sse, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_sse_norle, qoi_encode_chunk4_sse,
+};
+void (*enc_finish_arr[])(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*)={
+	qoi_encode_chunk3_scalar_norle, qoi_encode_chunk3_scalar, qoi_encode_chunk3_scalar_norle, qoi_encode_chunk3_scalar, qoi_encode_chunk3_scalar_norle, qoi_encode_chunk3_scalar,
+	qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar
+};
+
+void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
+	int i, max_size, p=0, run=0;
 	unsigned char *bytes;
 	qoi_rgba_t px_prev;
-	void (*enc_chunk)(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*);
-	void (*enc_finish)(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*);
 
 	if (
 		data == NULL || out_len == NULL || desc == NULL ||
 		desc->width == 0 || desc->height == 0 ||
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 3 ||
-		desc->height >= QOI_PIXELS_MAX / desc->width
+		desc->height >= QOI_PIXELS_MAX / desc->width ||
+		opt->rle>1 || opt->path>2
 	)
 		return NULL;
-
-	//use optimised encode functions depending on input and settings
-#ifdef QOI_SSE
-	if(desc->channels==3)
-		enc_chunk=qoi_encode_chunk3_sse;
-	else if(norle)
-		enc_chunk=qoi_encode_chunk4_scalar_norle;
-	else
-		enc_chunk=qoi_encode_chunk4_scalar;
-#else
-	if(norle && desc->channels==3)
-		enc_chunk=qoi_encode_chunk3_scalar_norle;
-	else if(norle && desc->channels==4)
-		enc_chunk=qoi_encode_chunk4_scalar_norle;
-	else if(desc->channels==3)
-		enc_chunk=qoi_encode_chunk3_scalar;
-	else
-		enc_chunk=qoi_encode_chunk4_scalar;
-#endif
-	if(norle && desc->channels==3)
-		enc_finish=qoi_encode_chunk3_scalar_norle;
-	else if(norle && desc->channels==4)
-		enc_finish=qoi_encode_chunk4_scalar_norle;
-	else if(desc->channels==3)
-		enc_finish=qoi_encode_chunk3_scalar;
-	else
-		enc_finish=qoi_encode_chunk4_scalar;
 
 	max_size =
 		desc->width * desc->height * (desc->channels + (desc->channels==4?2:1)) +
@@ -835,11 +843,11 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len) {
 	if(!(bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
 
-	qoi_encode_init(desc, bytes, &p, &px_prev);
+	qoi_encode_init(desc, bytes, &p, &px_prev, opt);
 	if((desc->width * desc->height)/CHUNK)//encode most of the input as the largest multiple of chunk size for simd
-		enc_chunk((const unsigned char *)data, bytes, &p, (desc->width * desc->height)-((desc->width * desc->height)%CHUNK), &px_prev, &run);
+		enc_chunk_arr[((desc->channels-3)*6)+((opt->path<<1)|opt->rle)]((const unsigned char *)data, bytes, &p, (desc->width * desc->height)-((desc->width * desc->height)%CHUNK), &px_prev, &run);
 	if((desc->width * desc->height)%CHUNK)//encode the trailing input scalar
-		enc_finish((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
+		enc_finish_arr[((desc->channels-3)*6)+((opt->path<<1)|opt->rle)]((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
 			bytes, &p, ((desc->width * desc->height)%CHUNK), &px_prev, &run);
 
 	if (run)
@@ -1090,28 +1098,13 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
 
-int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle) {
-	void (*enc_chunk)(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*);
-	void (*enc_finish)(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*);
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options * opt) {
 	int p=0, run=0;
 	qoi_desc desc;
 	unsigned char t, *in, *out;
 	unsigned int height=0, i, maxval=0, pixels, width=0;
 	qoi_rgba_t px_prev;
 	FILE *fi = fopen(ppm_f, "rb"), *fo=fopen(qoi_f, "wb");
-
-#ifdef QOI_SSE
-	enc_chunk=qoi_encode_chunk3_sse;
-#else
-	if(norle)
-		enc_chunk=qoi_encode_chunk3_scalar_norle;
-	else
-		enc_chunk=qoi_encode_chunk3_scalar;
-#endif
-	if(norle)
-		enc_finish=qoi_encode_chunk3_scalar_norle;
-	else
-		enc_finish=qoi_encode_chunk3_scalar;
 
 	fread(&t, 1, 1, fi);
 	if(t!='P')
@@ -1156,26 +1149,22 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle) {
 	desc.width=width;
 	desc.height=height;
 	desc.channels=3;
-#ifdef QOI_SSE
-	desc.colorspace=2;
-#else
-	desc.colorspace=norle?2:0;
-#endif
+	desc.colorspace=0;
 	in=QOI_MALLOC(CHUNK*3);
 	out=QOI_MALLOC(CHUNK*4);
-	qoi_encode_init(&desc, out, &p, &px_prev);
+	qoi_encode_init(&desc, out, &p, &px_prev, opt);
 	fwrite(out, 1, p, fo);
 	pixels=width*height;
 	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
 		fread(in, 1, CHUNK*3, fi);
 		p=0;
-		enc_chunk(in, out, &p, CHUNK, &px_prev, &run);
+		enc_chunk_arr[(opt->path<<1)|opt->rle](in, out, &p, CHUNK, &px_prev, &run);
 		fwrite(out, 1, p, fo);
 	}
 	if(i<pixels){
 		fread(in, 1, (pixels-i)*3, fi);
 		p=0;
-		enc_finish(in, out, &p, (pixels-i), &px_prev, &run);
+		enc_finish_arr[(opt->path<<1)|opt->rle](in, out, &p, (pixels-i), &px_prev, &run);
 		fwrite(out, 1, p, fo);
 	}
 	if(run){
@@ -1191,7 +1180,7 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle) {
 	return 0;
 }
 
-int qoi_write(const char *filename, const void *data, const qoi_desc *desc) {
+int qoi_write(const char *filename, const void *data, const qoi_desc *desc, const options *opt) {
 	FILE *f = fopen(filename, "wb");
 	int size, err;
 	void *encoded;
@@ -1199,7 +1188,7 @@ int qoi_write(const char *filename, const void *data, const qoi_desc *desc) {
 	if (!f)
 		return 0;
 
-	encoded = qoi_encode(data, desc, &size);
+	encoded = qoi_encode(data, desc, &size, opt);
 	if (!encoded) {
 		fclose(f);
 		return 0;

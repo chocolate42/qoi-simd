@@ -318,7 +318,7 @@ int opt_nozstd1 = 0;
 int opt_nozstd3 = 0;
 int opt_nozstd9 = 0;
 int opt_nozstd19 = 0;
-int opt_norle = 0;
+options opt={0};
 
 enum {
 	LIBPNG,
@@ -438,8 +438,8 @@ benchmark_result_t benchmark_image(const char *path) {
 			.width = w,
 			.height = h, 
 			.channels = channels,
-			.colorspace = (opt_norle<<1)|QOI_SRGB
-		}, &encoded_qoi_size);
+			.colorspace = QOI_SRGB
+		}, &encoded_qoi_size, &opt);
 	void *encoded_qoi_lz4=NULL;
 	void *encoded_qoi_zstd1=NULL;
 	void *encoded_qoi_zstd3=NULL;
@@ -589,8 +589,8 @@ benchmark_result_t benchmark_image(const char *path) {
 				.width = w,
 				.height = h, 
 				.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-			}, &enc_size);
+					.colorspace = QOI_SRGB
+			}, &enc_size, &opt);
 			res.libs[QOI].size = enc_size;
 			free(enc_p);
 		});
@@ -603,8 +603,8 @@ benchmark_result_t benchmark_image(const char *path) {
 					.width = w,
 					.height = h, 
 					.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-				}, &enc_size);
+					.colorspace = QOI_SRGB
+				}, &enc_size, &opt);
 				enc = malloc(LZ4_compressBound(enc_size));
 				res.libs[LZ4].size = LZ4_compress_default(enc_p, enc, enc_size, LZ4_compressBound(enc_size));
 				free(enc_p);
@@ -620,8 +620,8 @@ benchmark_result_t benchmark_image(const char *path) {
 					.width = w,
 					.height = h, 
 					.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-				}, &enc_size);
+					.colorspace = QOI_SRGB
+				}, &enc_size, &opt);
 				enc = malloc(ZSTD_compressBound(enc_size));
 				res.libs[ZSTD1].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 1);
 				free(enc_p);
@@ -637,8 +637,8 @@ benchmark_result_t benchmark_image(const char *path) {
 					.width = w,
 					.height = h, 
 					.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-				}, &enc_size);
+					.colorspace = QOI_SRGB
+				}, &enc_size, &opt);
 				enc = malloc(ZSTD_compressBound(enc_size));
 				res.libs[ZSTD3].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 3);
 				free(enc_p);
@@ -654,8 +654,8 @@ benchmark_result_t benchmark_image(const char *path) {
 					.width = w,
 					.height = h, 
 					.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-				}, &enc_size);
+					.colorspace = QOI_SRGB
+				}, &enc_size, &opt);
 				enc = malloc(ZSTD_compressBound(enc_size));
 				res.libs[ZSTD9].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 9);
 				free(enc_p);
@@ -671,8 +671,8 @@ benchmark_result_t benchmark_image(const char *path) {
 					.width = w,
 					.height = h, 
 					.channels = channels,
-					.colorspace = (opt_norle<<1)|QOI_SRGB
-				}, &enc_size);
+					.colorspace = QOI_SRGB
+				}, &enc_size, &opt);
 				enc = malloc(ZSTD_compressBound(enc_size));
 				res.libs[ZSTD19].size = ZSTD_compress(enc, ZSTD_compressBound(enc_size), enc_p, enc_size, 19);
 				free(enc_p);
@@ -783,7 +783,7 @@ int main(int argc, char **argv) {
 		printf("    --nozstd3 .... don't benchmark chained zstd compression level 3\n");
 		printf("    --nozstd9 .... don't benchmark chained zstd compression level 9\n");
 		printf("    --nozstd19 ... don't benchmark chained zstd compression level 19\n");
-		printf("    --norle ...... disable RLE on "EXT_STR" encode if possible\n");
+		printf("    --rle ........ enable RLE on "EXT_STR" encode, default disabled if possible\n");
 		printf("Examples\n");
 		printf("    "EXT_STR"bench 10 images/textures/\n");
 		printf("    "EXT_STR"bench 1 images/textures/ --nopng --nowarmup\n");
@@ -803,14 +803,9 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--nozstd3") == 0) { opt_nozstd3 = 1; }
 		else if (strcmp(argv[i], "--nozstd9") == 0) { opt_nozstd9 = 1; }
 		else if (strcmp(argv[i], "--nozstd19") == 0) { opt_nozstd19 = 1; }
-		else if (strcmp(argv[i], "--norle") == 0) { opt_norle = 1; }
+		else if (strcmp(argv[i], "--rle") == 0) { opt.rle = 1; }
 		else { ERROR("Unknown option %s", argv[i]); }
 	}
-
-	//disable norle for everything that doesn't support it
-#ifndef ROI
-	opt_norle=0;
-#endif
 
 	opt_runs = atoi(argv[1]);
 	if (opt_runs <=0) {
