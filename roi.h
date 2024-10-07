@@ -293,26 +293,26 @@ static inline uint32_t peek_u32le(const uint8_t* p) {
 	return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) | ((uint32_t)(p[3]) << 24);
 }
 
-static inline void poke_u8le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = (uint8_t)(x >> 0);
+static inline void poke_u8le(uint8_t* b, int *p, uint8_t x) {
+	b[(*p)++] = x;
 }
 
-static inline void poke_u16le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = (uint8_t)(x >> 0);
-	b[(*p)++] = (uint8_t)(x >> 8);
+static inline void poke_u16le(uint8_t* b, int *p, uint16_t x) {
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
 }
 
 static inline void poke_u24le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = (uint8_t)(x >> 0);
-	b[(*p)++] = (uint8_t)(x >> 8);
-	b[(*p)++] = (uint8_t)(x >> 16);
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
+	b[(*p)++] = (x >> 16)&255;
 }
 
 static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = (uint8_t)(x >> 0);
-	b[(*p)++] = (uint8_t)(x >> 8);
-	b[(*p)++] = (uint8_t)(x >> 16);
-	b[(*p)++] = (uint8_t)(x >> 24);
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
+	b[(*p)++] = (x >> 16)&255;
+	b[(*p)++] = (x >> 24)&255;
 }
 
 #define RGB_ENC_SCALAR do{\
@@ -1115,44 +1115,44 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle) {
 
 	fread(&t, 1, 1, fi);
 	if(t!='P')
-		return 0;
+		goto BAD_EXIT;
 	fread(&t, 1, 1, fi);
 	if(t!='6')
-		return 0;
+		goto BAD_EXIT;
 	do fread(&t, 1, 1, fi); while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'));
 	if((t<'0')||(t>'9'))
-		return 0;
+		goto BAD_EXIT;
 	while((t>='0')&&(t<='9')){
 		width*=10;
 		width+=(t-'0');
 		fread(&t, 1, 1, fi);
 	}
 	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		return 0;
+		goto BAD_EXIT;
 	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
 		fread(&t, 1, 1, fi);
 	if((t<'0')||(t>'9'))
-		return 0;
+		goto BAD_EXIT;
 	while((t>='0')&&(t<='9')){
 		height*=10;
 		height+=(t-'0');
 		fread(&t, 1, 1, fi);
 	}
 	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		return 0;
+		goto BAD_EXIT;
 	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
 		fread(&t, 1, 1, fi);
 	if((t<'0')||(t>'9'))
-		return 0;
+		goto BAD_EXIT;
 	while((t>='0')&&(t<='9')){
 		maxval*=10;
 		maxval+=(t-'0');
 		fread(&t, 1, 1, fi);
 	}
 	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		return 0;
+		goto BAD_EXIT;
 	if(maxval>255)//multi-byte not supported
-		return 0;
+		goto BAD_EXIT;
 	desc.width=width;
 	desc.height=height;
 	desc.channels=3;
@@ -1183,8 +1183,12 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, int norle) {
 		fwrite(out, 1, 1, fo);
 	}
 	fwrite(qoi_padding, 1, sizeof(qoi_padding), fo);
+	fclose(fi);
 	fclose(fo);
 	return 1;
+	BAD_EXIT:
+	fclose(fi);
+	return 0;
 }
 
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc) {
