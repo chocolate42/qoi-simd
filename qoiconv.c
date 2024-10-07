@@ -43,18 +43,29 @@ Compile with:
 int main(int argc, char **argv) {
 	int norle=0;
 	options opt={0};
-	if (argc < 3 || argc > 4) {
+	if (argc < 3) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
 		puts(" -rle : Enable RLE (disabled by default)");
+		puts(" -scalar : Use scalar instructions");
+		puts(" -sse : Use SSE instructions (if possible)");
+		puts("Defaults to fastest implemented instruction set");
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
 		exit(1);
 	}
 
-	if(argc==4 && strcmp(argv[1], "-rle")==0)
-		opt.rle=1;
+	for(int i=1;i<(argc-2);++i){
+		if(strcmp(argv[i], "-rle")==0)
+			opt.rle=1;
+		else if(strcmp(argv[i], "-scalar")==0)
+			opt.path=scalar;
+		else if(strcmp(argv[i], "-sse")==0)
+			opt.path=sse;
+		else
+			return printf("Unknown option '%s'\n", argv[i]);
+	}
 
 #ifdef ROI
 	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
