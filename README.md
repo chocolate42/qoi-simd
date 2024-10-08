@@ -14,10 +14,12 @@ roi is a qoi-like format using the following ops:
 ```
 
 ### Differences from qoi
+* Has a 3-byte RGB op, qoi only has 1/2/4 byte RGB ops
 * Takes the concept of encoding red and blue relative to green from qoi's 2-byte QOI_OP_LUMA op (poor man's colour transform), and applies it also to the 1-byte and 3-byte ops
-* There is no indexing op. Indexing is not simd-friendly, it also is detrimental on average to space-efficiency if the image is further compressed with a generic compressor
+* There is no indexing op. Indexing is not simd-friendly, is detrimental when the image is further compressed by a generic compressor, and using the opcode space for other ops on average reduces the encoded size even when not compressed further
+* Maximum run length stored in a single byte reduced to 30 from 62. The opcode space is better spent elsewhere
+* The alpha op is a 2 byte alpha followed by an RGB op (QOI_OP_LUMA232/QOI_OP_LUMA464/QOI_OP_LUMA777/QOI_OP_RGB), so a pixel with an alpha change is stored in 3-6 bytes (qoi always consumes 5 bytes with an alpha change)
 * Values are stored little-endian, which is friendlier to simd as well as being slightly more efficient on little-endian hardware generally
-* Runs 1..30 can be stored in a single byte (vs qoi 1..62 in a single byte), the opcode space saved is better spent on other ops
 
 ## Benchmarks (single thread, 64 bit, Linux)
 
