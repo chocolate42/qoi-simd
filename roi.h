@@ -271,7 +271,7 @@ enough for anybody. */
 //the number of pixels to process per chunk when chunk processing
 //must be a multiple of 64 for simd alignment
 //65536 chosen by scalar experimentation on Ryzen 7840u
-#define CHUNK 65536
+#define CHUNK 131072
 
 typedef union {
 	struct { unsigned char r, g, b, a; } rgba;
@@ -528,7 +528,7 @@ void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *
 
 void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
 	unsigned char prevdump[16];
-	const unsigned char writer_lut[4096] = {//shuffle used bytes in output vector to the left ready for writing
+	static const unsigned char writer_lut[4096] = {//shuffle used bytes in output vector to the left ready for writing
 		0,4,8,12,0,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,0,0,0,0,0,0,0,0,0,
 		0,4,5,8,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,12,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,12,0,0,0,0,0,0,0,0,
 		0,4,5,6,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,12,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,12,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,12,0,0,0,0,0,0,0,
@@ -830,7 +830,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		data == NULL || out_len == NULL || desc == NULL ||
 		desc->width == 0 || desc->height == 0 ||
 		desc->channels < 3 || desc->channels > 4 ||
-		desc->colorspace > 3 ||
+		desc->colorspace > 1 ||
 		desc->height >= QOI_PIXELS_MAX / desc->width ||
 		opt->rle>1 || opt->path>2
 	)
@@ -1049,6 +1049,69 @@ void dec_in3out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_de
 	}
 }
 
+typedef struct{
+	unsigned char *bytes, *pixels;
+	qoi_rgba_t px;
+	unsigned int b, b_limit, b_present, channels_out, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
+} dec_state;
+
+#define QOI_CHUNK_DECODE_COMMON \
+	int b1 = s->bytes[s->b++]; \
+	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
+		int vg = ((b1>>1)&7) - 6; \
+		s->px.rgba.r += vg + ((b1 >> 4) & 3); \
+		s->px.rgba.g += vg + 2; \
+		s->px.rgba.b += vg + ((b1 >> 6) & 3); \
+	} \
+	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
+		int b2=s->bytes[s->b++]; \
+		int vg = ((b1>>2)&63) - 40; \
+		s->px.rgba.r += vg + ((b2     ) & 0x0f); \
+		s->px.rgba.g += vg + 8; \
+		s->px.rgba.b += vg + ((b2 >>4) & 0x0f); \
+	} \
+	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
+		int b2=s->bytes[s->b++]; \
+		int b3=s->bytes[s->b++]; \
+		int vg = (((b2&3)<<5)|((b1>>3)&31))-128; \
+		s->px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
+		s->px.rgba.g += vg + 64; \
+		s->px.rgba.b += vg + ((b3>>1)&127); \
+	}
+
+void dec_chunk_all(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+s->channels_out)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if(s->run){
+			s->run--;
+		}
+		else{
+			OP_RGBA_GOTO:
+			QOI_CHUNK_DECODE_COMMON
+			else if (b1 == QOI_OP_RGB) {
+				signed char vg=s->bytes[s->b++];
+				signed char b3=s->bytes[s->b++];
+				signed char b4=s->bytes[s->b++];
+				s->px.rgba.r += vg + b3;
+				s->px.rgba.g += vg;
+				s->px.rgba.b += vg + b4;
+			}
+			else if (b1 == QOI_OP_RGBA) {
+				s->px.rgba.a = s->bytes[s->b++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		if(s->channels_out==4)
+			s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=s->channels_out;
+		s->pixel_curr++;
+	}
+}
+
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	void (*decode_func)(const unsigned char*, unsigned char*, qoi_desc *, int);
 	const unsigned char *bytes;
@@ -1098,7 +1161,75 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
 
-int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options * opt) {
+int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
+	char ppm_head[128];
+	dec_state s={0};
+	FILE *fi = fopen(qoi_f, "rb"), *fo;
+	qoi_desc desc={0};
+	unsigned char head[14];
+	unsigned int advancing;
+	if(NULL==(fi=fopen(qoi_f, "rb")))
+		return 0;
+	if(NULL==(fo=fopen(ppm_f, "wb")))
+		goto BADEXIT3;
+	if(14!=fread(head, 1, 14, fi))
+		goto BADEXIT2;
+
+	desc.width = head[4] << 24 | head[5] << 16 | head[6] << 8 | head[7];
+	desc.height = head[8] << 24 | head[9] << 16 | head[10] << 8 | head[11];
+	desc.channels = head[12];
+	desc.colorspace = head[13];
+
+	if(
+		desc.width==0 || desc.height==0 ||
+		desc.channels<3 || desc.channels>4 ||
+		desc.colorspace>3 ||
+		QOI_MAGIC!=(head[0] << 24 | head[1] << 16 | head[2] << 8 | head[3]) ||
+		desc.height >= QOI_PIXELS_MAX / desc.width
+	)
+		goto BADEXIT2;
+
+	sprintf(ppm_head, "P6 %u %u 255\n", desc.width, desc.height);
+	if(strlen(ppm_head)!=fwrite(ppm_head, 1, strlen(ppm_head), fo))
+		goto BADEXIT2;
+
+	s.b_limit=CHUNK*2;
+	s.bytes=QOI_MALLOC(s.b_limit);
+	s.p_limit=CHUNK*3;
+	s.pixels=QOI_MALLOC(s.p_limit);
+	s.px.rgba.a=255;
+	s.channels_out=3;
+	s.pixel_cnt=desc.width*desc.height;
+
+	while(s.pixel_curr!=s.pixel_cnt){
+		advancing=s.pixel_curr;
+		s.b_present+=fread(s.bytes+s.b_present, 1, s.b_limit-s.b_present, fi);
+		dec_chunk_all(&s);
+		if(s.px_pos!=fwrite(s.pixels, 1, s.px_pos, fo))
+			goto BADEXIT1;
+		memmove(s.bytes, s.bytes+s.b, s.b_present-s.b);
+		s.b_present-=s.b;
+		s.b=0;
+		s.px_pos=0;
+		if(advancing==s.pixel_curr)//truncated input
+			goto BADEXIT1;
+	}
+	free(s.bytes);
+	free(s.pixels);
+	fclose(fo);
+	fclose(fi);
+	return 0;
+	BADEXIT1:
+	free(s.bytes);
+	free(s.pixels);
+	BADEXIT2:
+	fclose(fo);
+	BADEXIT3:
+	fclose(fi);
+	return 1;
+}
+
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt) {
 	int p=0, run=0;
 	qoi_desc desc;
 	unsigned char t, *in, *out;
@@ -1174,10 +1305,10 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options * opt
 	fwrite(qoi_padding, 1, sizeof(qoi_padding), fo);
 	fclose(fi);
 	fclose(fo);
-	return 1;
+	return 0;
 	BAD_EXIT:
 	fclose(fi);
-	return 0;
+	return 1;
 }
 
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc, const options *opt) {
