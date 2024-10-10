@@ -1159,6 +1159,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 }
 
 #ifndef QOI_NO_STDIO
+#include <ctype.h>
 #include <stdio.h>
 
 int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
@@ -1168,10 +1169,10 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 	qoi_desc desc={0};
 	unsigned char head[14];
 	unsigned int advancing;
-	if(NULL==(fi=fopen(qoi_f, "rb")))
-		return 0;
-	if(NULL==(fo=fopen(ppm_f, "wb")))
-		goto BADEXIT3;
+	if(!(fi=fopen(qoi_f, "rb")))
+		goto BADEXIT0;
+	if(!(fo=fopen(ppm_f, "wb")))
+		goto BADEXIT1;
 	if(14!=fread(head, 1, 14, fi))
 		goto BADEXIT2;
 
@@ -1194,40 +1195,60 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 		goto BADEXIT2;
 
 	s.b_limit=CHUNK*2;
-	s.bytes=QOI_MALLOC(s.b_limit);
+	if(!(s.bytes=QOI_MALLOC(s.b_limit)))
+		goto BADEXIT2;
 	s.p_limit=CHUNK*3;
-	s.pixels=QOI_MALLOC(s.p_limit);
+	if(!(s.pixels=QOI_MALLOC(s.p_limit)))
+		goto BADEXIT3;
 	s.px.rgba.a=255;
 	s.channels_out=3;
 	s.pixel_cnt=desc.width*desc.height;
-
 	while(s.pixel_curr!=s.pixel_cnt){
 		advancing=s.pixel_curr;
 		s.b_present+=fread(s.bytes+s.b_present, 1, s.b_limit-s.b_present, fi);
 		dec_chunk_all(&s);
 		if(s.px_pos!=fwrite(s.pixels, 1, s.px_pos, fo))
-			goto BADEXIT1;
+			goto BADEXIT4;
 		memmove(s.bytes, s.bytes+s.b, s.b_present-s.b);
 		s.b_present-=s.b;
 		s.b=0;
 		s.px_pos=0;
 		if(advancing==s.pixel_curr)//truncated input
-			goto BADEXIT1;
+			goto BADEXIT4;
 	}
-	free(s.bytes);
 	free(s.pixels);
+	free(s.bytes);
 	fclose(fo);
 	fclose(fi);
 	return 0;
-	BADEXIT1:
-	free(s.bytes);
+	BADEXIT4:
 	free(s.pixels);
+	BADEXIT3:
+	free(s.bytes);
 	BADEXIT2:
 	fclose(fo);
-	BADEXIT3:
+	BADEXIT1:
 	fclose(fi);
+	BADEXIT0:
 	return 1;
 }
+
+#define PPM_SPACE_NUM(var) do{ \
+	if(!isspace(t)) \
+		goto BADEXIT1; \
+	do { \
+		if(1!=fread(&t, 1, 1, fi)) \
+			goto BADEXIT1; \
+	} while(isspace(t)); \
+	if(!isdigit(t)) \
+		goto BADEXIT1; \
+	while(isdigit(t)){ \
+		var*=10; \
+		var+=(t-'0'); \
+		if(1!=fread(&t, 1, 1, fi)) \
+			goto BADEXIT1; \
+	} \
+}while(0);
 
 int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt) {
 	int p=0, run=0;
@@ -1235,79 +1256,83 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	unsigned char t, *in, *out;
 	unsigned int height=0, i, maxval=0, pixels, width=0;
 	qoi_rgba_t px_prev;
-	FILE *fi = fopen(ppm_f, "rb"), *fo=fopen(qoi_f, "wb");
+	FILE *fi, *fo;
 
-	fread(&t, 1, 1, fi);
+	if(!(fi = fopen(ppm_f, "rb")))
+		goto BADEXIT0;
+	if(!(fo=fopen(qoi_f, "wb")))
+		goto BADEXIT1;
+
+	//magic
+	if(1!=fread(&t, 1, 1, fi))
+		goto BADEXIT2;
 	if(t!='P')
-		goto BAD_EXIT;
-	fread(&t, 1, 1, fi);
+		goto BADEXIT2;
+	if(1!=fread(&t, 1, 1, fi))
+		goto BADEXIT2;
 	if(t!='6')
-		goto BAD_EXIT;
-	do fread(&t, 1, 1, fi); while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'));
-	if((t<'0')||(t>'9'))
-		goto BAD_EXIT;
-	while((t>='0')&&(t<='9')){
-		width*=10;
-		width+=(t-'0');
-		fread(&t, 1, 1, fi);
-	}
-	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		goto BAD_EXIT;
-	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
-		fread(&t, 1, 1, fi);
-	if((t<'0')||(t>'9'))
-		goto BAD_EXIT;
-	while((t>='0')&&(t<='9')){
-		height*=10;
-		height+=(t-'0');
-		fread(&t, 1, 1, fi);
-	}
-	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		goto BAD_EXIT;
-	while((t==' ')||(t=='\t')||(t=='\n')||(t=='\r'))
-		fread(&t, 1, 1, fi);
-	if((t<'0')||(t>'9'))
-		goto BAD_EXIT;
-	while((t>='0')&&(t<='9')){
-		maxval*=10;
-		maxval+=(t-'0');
-		fread(&t, 1, 1, fi);
-	}
-	if((t!=' ')&&(t!='\t')&&(t!='\n')&&(t!='\r'))
-		goto BAD_EXIT;
+		goto BADEXIT2;
+
+	//rest of header
+	if(1!=fread(&t, 1, 1, fi))
+		goto BADEXIT2;
+	PPM_SPACE_NUM(width);
+	PPM_SPACE_NUM(height);
+	PPM_SPACE_NUM(maxval);
+	if(!isspace(t))
+		goto BADEXIT2;
 	if(maxval>255)//multi-byte not supported
-		goto BAD_EXIT;
+		goto BADEXIT2;
+
+	if(!(in=QOI_MALLOC(CHUNK*3)))
+		goto BADEXIT2;
+	if(!(out=QOI_MALLOC(CHUNK*4)))
+		goto BADEXIT3;
 	desc.width=width;
 	desc.height=height;
 	desc.channels=3;
 	desc.colorspace=0;
-	in=QOI_MALLOC(CHUNK*3);
-	out=QOI_MALLOC(CHUNK*4);
 	qoi_encode_init(&desc, out, &p, &px_prev, opt);
-	fwrite(out, 1, p, fo);
+	if(p!=fwrite(out, 1, p, fo))
+		goto BADEXIT4;
 	pixels=width*height;
 	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
-		fread(in, 1, CHUNK*3, fi);
+		if((CHUNK*3)!=fread(in, 1, CHUNK*3, fi))
+			goto BADEXIT4;
 		p=0;
 		enc_chunk_arr[(opt->path<<1)|opt->rle](in, out, &p, CHUNK, &px_prev, &run);
-		fwrite(out, 1, p, fo);
+		if(p!=fwrite(out, 1, p, fo))
+			goto BADEXIT4;
 	}
 	if(i<pixels){
-		fread(in, 1, (pixels-i)*3, fi);
+		if(((pixels-i)*3)!=fread(in, 1, (pixels-i)*3, fi))
+			goto BADEXIT4;
 		p=0;
 		enc_finish_arr[(opt->path<<1)|opt->rle](in, out, &p, (pixels-i), &px_prev, &run);
-		fwrite(out, 1, p, fo);
+		if(p!=fwrite(out, 1, p, fo))
+			goto BADEXIT4;
 	}
 	if(run){
 		out[0] = QOI_OP_RUN | ((run - 1)<<3);
-		fwrite(out, 1, 1, fo);
+		if(1!=fwrite(out, 1, 1, fo))
+			goto BADEXIT4;
 	}
-	fwrite(qoi_padding, 1, sizeof(qoi_padding), fo);
-	fclose(fi);
+	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
+		goto BADEXIT4;
+	free(out);
+	free(in);
 	fclose(fo);
-	return 0;
-	BAD_EXIT:
 	fclose(fi);
+	return 0;
+	BADEXIT4:
+	free(out);
+	BADEXIT3:
+	free(in);
+	BADEXIT2:
+	fclose(fo);
+	BADEXIT1:
+	fclose(fi);
+	BADEXIT0:
 	return 1;
 }
 
