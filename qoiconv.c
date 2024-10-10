@@ -129,7 +129,10 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	free(pixels);
+	if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR))
+		QOI_FREE(pixels);
+	else
+		free(pixels);
 #ifdef ROI
 	}
 #endif
