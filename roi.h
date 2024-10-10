@@ -1161,6 +1161,7 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 	}
 	QOI_FREE(s.pixels);
 	QOI_FREE(s.bytes);
+	fflush(fo);
 	fclose(fo);
 	fclose(fi);
 	return 0;
@@ -1269,6 +1270,7 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 		goto BADEXIT4;
 	QOI_FREE(out);
 	QOI_FREE(in);
+	fflush(fo);
 	fclose(fo);
 	fclose(fi);
 	return 0;
