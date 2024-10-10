@@ -193,6 +193,13 @@ The returned pixel data should be free()d after use. */
 
 void *qoi_read(const char *filename, qoi_desc *desc, int channels);
 
+/* Decode directly from a QOI file to a PPM file
+
+The function returns 0 on failure (invalid parameters, or fopen or malloc
+failed) or 1 on success. */
+
+int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt);
+
 #endif /* QOI_NO_STDIO */
 
 /* Encode raw RGB or RGBA pixels into a QOI image in memory.
@@ -860,202 +867,6 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 
 //core decode macros used in optimised decode functions
 #define QOI_DECODE_COMMON \
-	int b1 = bytes[p++]; \
-	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
-		int vg = ((b1>>1)&7) - 6; \
-		px.rgba.r += vg + ((b1 >> 4) & 3); \
-		px.rgba.g += vg + 2; \
-		px.rgba.b += vg + ((b1 >> 6) & 3); \
-	} \
-	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
-		int b2=bytes[p++]; \
-		int vg = ((b1>>2)&63) - 40; \
-		px.rgba.r += vg + ((b2     ) & 0x0f); \
-		px.rgba.g += vg + 8; \
-		px.rgba.b += vg + ((b2 >>4) & 0x0f); \
-	} \
-	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
-		int b2=bytes[p++]; \
-		int b3=bytes[p++]; \
-		int vg = (((b2&3)<<5)|((b1>>3)&31))-128; \
-		px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
-		px.rgba.g += vg + 64; \
-		px.rgba.b += vg + ((b3>>1)&127); \
-	}
-
-#define QOI_DECODE_COMMONA_2 \
-	else if (b1 == QOI_OP_RGB) { \
-		signed char vg=bytes[p++]; \
-		signed char b3=bytes[p++]; \
-		signed char b4=bytes[p++]; \
-		px.rgba.r += vg + b3; \
-		px.rgba.g += vg; \
-		px.rgba.b += vg + b4; \
-	}
-
-#define QOI_DECODE_COMMONB_2 \
-	else { \
-		signed char vg=bytes[p++]; \
-		signed char b3=bytes[p++]; \
-		signed char b4=bytes[p++]; \
-		px.rgba.r += vg + b3; \
-		px.rgba.g += vg; \
-		px.rgba.b += vg + b4; \
-	} \
-	pixels[px_pos + 0] = px.rgba.r; \
-	pixels[px_pos + 1] = px.rgba.g; \
-	pixels[px_pos + 2] = px.rgba.b;
-
-#define QOI_DECODE_COMMONA \
-	QOI_DECODE_COMMON \
-	QOI_DECODE_COMMONA_2
-
-#define QOI_DECODE_COMMONB \
-	QOI_DECODE_COMMON \
-	QOI_DECODE_COMMONB_2
-
-#define DEC_INIT_COMMON \
-	qoi_rgba_t px; \
-	int px_len=desc->width*desc->height*channels, px_pos=0; \
-	int p = 0; \
-	px.rgba.r = 0; \
-	px.rgba.g = 0; \
-	px.rgba.b = 0; \
-	px.rgba.a = 255;
-
-void dec_in4out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	int run=0;
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-		if (run)
-			run--;
-		else{
-			OP_RGBA_GOTO:
-			QOI_DECODE_COMMONA
-			else if (b1 == QOI_OP_RGBA) {
-				px.rgba.a = bytes[p++];
-				goto OP_RGBA_GOTO;
-			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = ((b1>>3) & 0x1f);
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-		pixels[px_pos + 3] = px.rgba.a;
-	}
-}
-
-void dec_in4out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	int run=0;
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-		if (run)
-			run--;
-		else{
-			OP_RGBA_GOTO:
-			QOI_DECODE_COMMONA
-			else if (b1 == QOI_OP_RGBA) {
-				px.rgba.a = bytes[p++];
-				goto OP_RGBA_GOTO;
-			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = ((b1>>3) & 0x1f);
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-	}
-}
-
-void dec_in3out4(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	int run=0;
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-		if (run)
-			run--;
-		else{
-			QOI_DECODE_COMMONA
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = ((b1>>3) & 0x1f);
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-		pixels[px_pos + 3] = px.rgba.a;
-	}
-}
-
-void dec_in3out3(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	int run=0;
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-		if (run)
-			run--;
-		else{
-			QOI_DECODE_COMMONA
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				run = ((b1>>3) & 0x1f);
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-	}
-}
-
-void dec_in4out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-		OP_RGBA_GOTO:
-		QOI_DECODE_COMMONA
-		else if (b1 == QOI_OP_RGBA) {
-			px.rgba.a = bytes[p++];
-			goto OP_RGBA_GOTO;
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-		pixels[px_pos + 3] = px.rgba.a;
-	}
-}
-
-void dec_in4out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-		OP_RGBA_GOTO:
-		QOI_DECODE_COMMONA
-		else if (b1 == QOI_OP_RGBA) {
-			px.rgba.a = bytes[p++];
-			goto OP_RGBA_GOTO;
-		}
-		pixels[px_pos + 0] = px.rgba.r;
-		pixels[px_pos + 1] = px.rgba.g;
-		pixels[px_pos + 2] = px.rgba.b;
-	}
-}
-
-void dec_in3out4_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 4) {
-		QOI_DECODE_COMMONB
-		pixels[px_pos + 3] = px.rgba.a;
-	}
-}
-
-void dec_in3out3_norle(const unsigned char *bytes, unsigned char *pixels, qoi_desc *desc, int channels){
-	DEC_INIT_COMMON
-	for (px_pos = 0; px_pos < px_len; px_pos += 3) {
-		QOI_DECODE_COMMONB
-	}
-}
-
-typedef struct{
-	unsigned char *bytes, *pixels;
-	qoi_rgba_t px;
-	unsigned int b, b_limit, b_present, channels_out, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
-} dec_state;
-
-#define QOI_CHUNK_DECODE_COMMON \
 	int b1 = s->bytes[s->b++]; \
 	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
 		int vg = ((b1>>1)&7) - 6; \
@@ -1079,22 +890,50 @@ typedef struct{
 		s->px.rgba.b += vg + ((b3>>1)&127); \
 	}
 
-void dec_chunk_all(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+s->channels_out)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		if(s->run){
+#define QOI_DECODE_COMMONA_2 \
+	else if (b1 == QOI_OP_RGB) { \
+		signed char vg=s->bytes[s->b++]; \
+		signed char b3=s->bytes[s->b++]; \
+		signed char b4=s->bytes[s->b++]; \
+		s->px.rgba.r += vg + b3; \
+		s->px.rgba.g += vg; \
+		s->px.rgba.b += vg + b4; \
+	}
+
+#define QOI_DECODE_COMMONB_2 \
+	else { \
+		signed char vg=s->bytes[s->b++]; \
+		signed char b3=s->bytes[s->b++]; \
+		signed char b4=s->bytes[s->b++]; \
+		s->px.rgba.r += vg + b3; \
+		s->px.rgba.g += vg; \
+		s->px.rgba.b += vg + b4; \
+	} \
+	s->pixels[s->px_pos + 0] = s->px.rgba.r; \
+	s->pixels[s->px_pos + 1] = s->px.rgba.g; \
+	s->pixels[s->px_pos + 2] = s->px.rgba.b;
+
+#define QOI_DECODE_COMMONA \
+	QOI_DECODE_COMMON \
+	QOI_DECODE_COMMONA_2
+
+#define QOI_DECODE_COMMONB \
+	QOI_DECODE_COMMON \
+	QOI_DECODE_COMMONB_2
+
+typedef struct{
+	unsigned char *bytes, *pixels;
+	qoi_rgba_t px;
+	unsigned int b, b_limit, b_present, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
+} dec_state;
+
+void dec_in4out4(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
 			s->run--;
-		}
 		else{
 			OP_RGBA_GOTO:
-			QOI_CHUNK_DECODE_COMMON
-			else if (b1 == QOI_OP_RGB) {
-				signed char vg=s->bytes[s->b++];
-				signed char b3=s->bytes[s->b++];
-				signed char b4=s->bytes[s->b++];
-				s->px.rgba.r += vg + b3;
-				s->px.rgba.g += vg;
-				s->px.rgba.b += vg + b4;
-			}
+			QOI_DECODE_COMMONA
 			else if (b1 == QOI_OP_RGBA) {
 				s->px.rgba.a = s->bytes[s->b++];
 				goto OP_RGBA_GOTO;
@@ -1105,20 +944,124 @@ void dec_chunk_all(dec_state *s){
 		s->pixels[s->px_pos + 0] = s->px.rgba.r;
 		s->pixels[s->px_pos + 1] = s->px.rgba.g;
 		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		if(s->channels_out==4)
-			s->pixels[s->px_pos + 3] = s->px.rgba.a;
-		s->px_pos+=s->channels_out;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
 		s->pixel_curr++;
 	}
 }
 
+void dec_in4out3(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			OP_RGBA_GOTO:
+			QOI_DECODE_COMMONA
+			else if (b1 == QOI_OP_RGBA) {
+				s->px.rgba.a = s->bytes[s->b++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in3out4(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			QOI_DECODE_COMMONA
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in3out3(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			QOI_DECODE_COMMONA
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in4out4_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMONA
+		else if (b1 == QOI_OP_RGBA) {
+			s->px.rgba.a = s->bytes[s->b++];
+			goto OP_RGBA_GOTO;
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in4out3_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMONA
+		else if (b1 == QOI_OP_RGBA) {
+			s->px.rgba.a = s->bytes[s->b++];
+			goto OP_RGBA_GOTO;
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in3out4_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		QOI_DECODE_COMMONB
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+void dec_in3out3_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		QOI_DECODE_COMMONB
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+void (*decode_arr[])(dec_state*)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
+
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
-	void (*decode_func)(const unsigned char*, unsigned char*, qoi_desc *, int);
-	const unsigned char *bytes;
 	unsigned int header_magic;
-	unsigned char *pixels;
-	int p=0, px_len;
-	void (*decode_arr[])(const unsigned char*, unsigned char*, qoi_desc *, int)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
+	dec_state s={0};
 
 	if (
 		data == NULL || desc == NULL ||
@@ -1127,13 +1070,13 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	)
 		return NULL;
 
-	bytes = (const unsigned char *)data;
+	s.bytes=(unsigned char*)data;
 
-	header_magic = qoi_read_32(bytes, &p);
-	desc->width = qoi_read_32(bytes, &p);
-	desc->height = qoi_read_32(bytes, &p);
-	desc->channels = bytes[p++];
-	desc->colorspace = bytes[p++];
+	header_magic = qoi_read_32(s.bytes, &(s.b));
+	desc->width = qoi_read_32(s.bytes, &(s.b));
+	desc->height = qoi_read_32(s.bytes, &(s.b));
+	desc->channels = s.bytes[s.b++];
+	desc->colorspace = s.bytes[s.b++];
 
 	if (
 		desc->width == 0 || desc->height == 0 ||
@@ -1147,15 +1090,17 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	if (channels == 0)
 		channels = desc->channels;
 
-	px_len = desc->width * desc->height * channels;
-	pixels = (unsigned char *) QOI_MALLOC(px_len);
-	if (!pixels)
+	s.pixel_cnt=desc->width * desc->height;
+	s.p_limit=s.pixel_cnt*channels;
+	if(!(s.pixels = QOI_MALLOC(s.p_limit)))
 		return NULL;
+	s.b_limit=size;
+	s.b_present=size;
+	s.px.rgba.a=255;
 
-	decode_func=decode_arr[(((desc->colorspace>>1)&1)?4:0)+((desc->channels==3)?2:0)+((channels==3)?1:0)];
-	decode_func(bytes+p, pixels, desc, channels);
+	decode_arr[(((desc->colorspace>>1)&1)?4:0)+((desc->channels==3)?2:0)+((channels==3)?1:0)](&s);
 
-	return pixels;
+	return s.pixels;
 }
 
 #ifndef QOI_NO_STDIO
@@ -1200,12 +1145,11 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 	if(!(s.pixels=QOI_MALLOC(s.p_limit)))
 		goto BADEXIT3;
 	s.px.rgba.a=255;
-	s.channels_out=3;
 	s.pixel_cnt=desc.width*desc.height;
 	while(s.pixel_curr!=s.pixel_cnt){
 		advancing=s.pixel_curr;
 		s.b_present+=fread(s.bytes+s.b_present, 1, s.b_limit-s.b_present, fi);
-		dec_chunk_all(&s);
+		decode_arr[(((desc.colorspace>>1)&1)?4:0)+((desc.channels==3)?2:0)+1/*channels==3*/](&s);
 		if(s.px_pos!=fwrite(s.pixels, 1, s.px_pos, fo))
 			goto BADEXIT4;
 		memmove(s.bytes, s.bytes+s.b, s.b_present-s.b);
