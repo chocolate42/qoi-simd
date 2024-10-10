@@ -1159,7 +1159,6 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 }
 
 #ifndef QOI_NO_STDIO
-#include <ctype.h>
 #include <stdio.h>
 
 int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
@@ -1216,15 +1215,15 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 		if(advancing==s.pixel_curr)//truncated input
 			goto BADEXIT4;
 	}
-	free(s.pixels);
-	free(s.bytes);
+	QOI_FREE(s.pixels);
+	QOI_FREE(s.bytes);
 	fclose(fo);
 	fclose(fi);
 	return 0;
 	BADEXIT4:
-	free(s.pixels);
+	QOI_FREE(s.pixels);
 	BADEXIT3:
-	free(s.bytes);
+	QOI_FREE(s.bytes);
 	BADEXIT2:
 	fclose(fo);
 	BADEXIT1:
@@ -1233,6 +1232,11 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 	return 1;
 }
 
+//avoid including ctype.h with these defines
+#define isspace(num) (num==' '||((num>=0x09) && (num<=0x0d)))
+#define isdigit(num) ((num>='0') && (num<='9'))
+
+//Read a variable from a ppm header
 #define PPM_SPACE_NUM(var) do{ \
 	if(!isspace(t)) \
 		goto BADEXIT1; \
@@ -1319,15 +1323,15 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	}
 	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
 		goto BADEXIT4;
-	free(out);
-	free(in);
+	QOI_FREE(out);
+	QOI_FREE(in);
 	fclose(fo);
 	fclose(fi);
 	return 0;
 	BADEXIT4:
-	free(out);
+	QOI_FREE(out);
 	BADEXIT3:
-	free(in);
+	QOI_FREE(in);
 	BADEXIT2:
 	fclose(fo);
 	BADEXIT1:
