@@ -1,0 +1,688 @@
+//optimised encode functions////////////////////////////////////////////////////
+
+static inline uint32_t peek_u32le(const uint8_t* p) {
+	return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) | ((uint32_t)(p[3]) << 24);
+}
+
+static inline void poke_u8le(uint8_t* b, int *p, uint8_t x) {
+	b[(*p)++] = x;
+}
+
+static inline void poke_u16le(uint8_t* b, int *p, uint16_t x) {
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
+}
+
+static inline void poke_u24le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
+	b[(*p)++] = (x >> 16)&255;
+}
+
+static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
+	b[(*p)++] = x&255;
+	b[(*p)++] = (x >> 8)&255;
+	b[(*p)++] = (x >> 16)&255;
+	b[(*p)++] = (x >> 24)&255;
+}
+
+#define RGB_ENC_SCALAR do{\
+	signed char vr = px.rgba.r - px_prev.rgba.r;\
+	signed char vg = px.rgba.g - px_prev.rgba.g;\
+	signed char vb = px.rgba.b - px_prev.rgba.b;\
+	signed char vg_r = vr - vg;\
+	signed char vg_b = vb - vg;\
+	unsigned char ar = (vg_r<0)?(-vg_r)-1:vg_r;\
+	unsigned char ag = (vg<0)?(-vg)-1:vg;\
+	unsigned char ab = (vg_b<0)?(-vg_b)-1:vg_b;\
+	unsigned char arb = ar|ab;\
+	if ( arb < 2 && ag  < 4 ) {\
+		bytes[p++]=QOI_OP_LUMA232|((vg_b+2)<<6)|((vg_r+2)<<4)|((vg+4)<<1);\
+	} else if ( arb <  8 && ag  < 32 ) {\
+		poke_u16le(bytes, &p, QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2));\
+	} else if ( (arb|ag) < 64 ) {\
+		poke_u24le(bytes, &p, QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3));\
+	} else {\
+		bytes[p++]=QOI_OP_RGB; \
+		bytes[p++]=vg; \
+		bytes[p++]=vg_r; \
+		bytes[p++]=vg_b; \
+	}\
+}while(0)
+
+static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	int run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
+	px.rgba.a=255;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end){
+				for(;run>=30;run-=30)
+					bytes[p++] = QOI_OP_RUN30;
+				goto DONE;
+			}
+			px_pos+=3;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = QOI_OP_RUN30;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
+			run = 0;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+static void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
+	px.rgba.a=255;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	*pixel_prev=px_prev;
+	*pp=p;
+}
+
+static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp, run=*r;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		px.rgba.a = pixels[px_pos + 3];
+
+		while(px.v == px_prev.v) {
+			++run;
+			if(px_pos == px_end) {
+				for(;run>=30;run-=30)
+					bytes[p++] = QOI_OP_RUN30;
+				goto DONE;
+			}
+			px_pos+=4;
+			px.rgba.r = pixels[px_pos + 0];
+			px.rgba.g = pixels[px_pos + 1];
+			px.rgba.b = pixels[px_pos + 2];
+			px.rgba.a = pixels[px_pos + 3];
+		}
+		for(;run>=30;run-=30)
+			bytes[p++] = QOI_OP_RUN30;
+		if (run) {
+			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
+			run = 0;
+		}
+		if(px.rgba.a!=px_prev.rgba.a){
+			bytes[p++] = QOI_OP_RGBA;
+			bytes[p++] = px.rgba.a;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	DONE:
+	*pixel_prev=px_prev;
+	*r=run;
+	*pp=p;
+}
+
+static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	int p=*pp;
+	qoi_rgba_t px, px_prev=*pixel_prev;
+	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
+	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
+		px.rgba.r = pixels[px_pos + 0];
+		px.rgba.g = pixels[px_pos + 1];
+		px.rgba.b = pixels[px_pos + 2];
+		px.rgba.a = pixels[px_pos + 3];
+		if(px.rgba.a!=px_prev.rgba.a){
+			bytes[p++] = QOI_OP_RGBA;
+			bytes[p++] = px.rgba.a;
+		}
+		RGB_ENC_SCALAR;
+		px_prev = px;
+	}
+	*pixel_prev=px_prev;
+	*pp=p;
+}
+
+#ifdef QOI_SSE
+//load the next 16 bytes, diff pixels
+#define LOAD16(raw, diff, prev, offset) do{ \
+	raw=_mm_loadu_si128((__m128i const*)(pixels+px_pos+offset)); \
+	diff=_mm_slli_si128(raw, 3); \
+	prev=_mm_srli_si128(prev, 13); \
+	diff=_mm_or_si128(diff, prev); \
+	diff=_mm_sub_epi8(raw, diff); \
+}while(0)
+
+//de-interleave one plane from 3 vectors containing RGB
+#define PLANAR_SHUFFLE(plane, source1, source2, source3, shufflemask) do{ \
+	plane=_mm_blendv_epi8(source1, source2, blend1); \
+	plane=_mm_blendv_epi8(plane, source3, blend2); \
+	plane=_mm_shuffle_epi8(plane, shufflemask); \
+}while(0)
+
+//do (x<0)?(-x)-1:x for a single plane
+#define ABSOLUTER(plane, absolute) do{ \
+	working2=_mm_cmpgt_epi8(zero, plane); \
+	working=_mm_and_si128(working2, plane); \
+	working=_mm_add_epi8(working, num1); \
+	working=_mm_abs_epi8(working); \
+	absolute=_mm_blendv_epi8(plane, working, working2); \
+}while(0)
+
+//the following 2 macros:
+// normalise value depending on opcode
+// shift value to where it is in the op
+// combine into 4 result vectors
+#define NORMALISE_SHIFT16_EMBIGGEN(plane, opmask, value, shift) do{ \
+	working=_mm_add_epi8(plane, value); \
+	working=_mm_and_si128(working, opmask); \
+	working2=_mm_unpacklo_epi8(working, zero); \
+	working2=_mm_slli_epi16(working2, shift); \
+	working3=_mm_unpacklo_epi16(working2, zero); \
+	res0=_mm_or_si128(working3, res0); \
+	working3=_mm_unpackhi_epi16(working2, zero); \
+	res1=_mm_or_si128(working3, res1); \
+	working2=_mm_unpackhi_epi8(working, zero); \
+	working2=_mm_slli_epi16(working2, shift); \
+	working3=_mm_unpacklo_epi16(working2, zero); \
+	res2=_mm_or_si128(working3, res2); \
+	working3=_mm_unpackhi_epi16(working2, zero); \
+	res3=_mm_or_si128(working3, res3); \
+}while(0)
+
+#define NORMALISE_SHIFT32_EMBIGGEN(plane, opmask, value, shift) do{ \
+	working=_mm_add_epi8(plane, value); \
+	working=_mm_and_si128(working, opmask); \
+	working2=_mm_unpacklo_epi8(working, zero); \
+	working3=_mm_unpacklo_epi16(working2, zero); \
+	working3=_mm_slli_epi32(working3, shift); \
+	res0=_mm_or_si128(working3, res0); \
+	working3=_mm_unpackhi_epi16(working2, zero); \
+	working3=_mm_slli_epi32(working3, shift); \
+	res1=_mm_or_si128(working3, res1); \
+	working2=_mm_unpackhi_epi8(working, zero); \
+	working3=_mm_unpacklo_epi16(working2, zero); \
+	working3=_mm_slli_epi32(working3, shift); \
+	res2=_mm_or_si128(working3, res2); \
+	working3=_mm_unpackhi_epi16(working2, zero); \
+	working3=_mm_slli_epi32(working3, shift); \
+	res3=_mm_or_si128(working3, res3); \
+}while(0)
+
+static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
+	unsigned char prevdump[16];
+	static const unsigned char writer_lut[4096] = {//shuffle used bytes in output vector to the left ready for writing
+		0,4,8,12,0,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,0,0,0,0,0,0,0,0,0,
+		0,4,5,8,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,12,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,12,0,0,0,0,0,0,0,0,
+		0,4,5,6,8,12,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,12,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,12,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,12,0,0,0,0,0,0,0,
+		0,4,5,6,7,8,12,0,0,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,12,0,0,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,12,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,12,0,0,0,0,0,0,
+		0,4,8,9,12,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,12,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,12,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,12,0,0,0,0,0,0,0,0,
+		0,4,5,8,9,12,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,12,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,12,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,12,0,0,0,0,0,0,0,
+		0,4,5,6,8,9,12,0,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,12,0,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,12,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,12,0,0,0,0,0,0,
+		0,4,5,6,7,8,9,12,0,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,12,0,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,12,0,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,12,0,0,0,0,0,
+		0,4,8,9,10,12,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,10,12,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,10,12,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,10,12,0,0,0,0,0,0,0,
+		0,4,5,8,9,10,12,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,10,12,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,10,12,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,10,12,0,0,0,0,0,0,
+		0,4,5,6,8,9,10,12,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,10,12,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,10,12,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,10,12,0,0,0,0,0,
+		0,4,5,6,7,8,9,10,12,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,10,12,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,10,12,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,10,12,0,0,0,0,
+		0,4,8,9,10,11,12,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,10,11,12,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,10,11,12,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,10,11,12,0,0,0,0,0,0,
+		0,4,5,8,9,10,11,12,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,10,11,12,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,10,11,12,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,10,11,12,0,0,0,0,0,
+		0,4,5,6,8,9,10,11,12,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,10,11,12,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,10,11,12,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,10,11,12,0,0,0,0,
+		0,4,5,6,7,8,9,10,11,12,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,10,11,12,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,10,11,12,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,10,11,12,0,0,0,
+		0,4,8,12,13,0,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,13,0,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,13,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,13,0,0,0,0,0,0,0,0,
+		0,4,5,8,12,13,0,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,12,13,0,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,12,13,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,12,13,0,0,0,0,0,0,0,
+		0,4,5,6,8,12,13,0,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,12,13,0,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,12,13,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,12,13,0,0,0,0,0,0,
+		0,4,5,6,7,8,12,13,0,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,12,13,0,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,12,13,0,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,12,13,0,0,0,0,0,
+		0,4,8,9,12,13,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,12,13,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,12,13,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,12,13,0,0,0,0,0,0,0,
+		0,4,5,8,9,12,13,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,12,13,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,12,13,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,12,13,0,0,0,0,0,0,
+		0,4,5,6,8,9,12,13,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,12,13,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,12,13,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,12,13,0,0,0,0,0,
+		0,4,5,6,7,8,9,12,13,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,12,13,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,12,13,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,12,13,0,0,0,0,
+		0,4,8,9,10,12,13,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,10,12,13,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,10,12,13,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,10,12,13,0,0,0,0,0,0,
+		0,4,5,8,9,10,12,13,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,10,12,13,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,10,12,13,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,10,12,13,0,0,0,0,0,
+		0,4,5,6,8,9,10,12,13,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,10,12,13,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,10,12,13,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,10,12,13,0,0,0,0,
+		0,4,5,6,7,8,9,10,12,13,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,10,12,13,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,10,12,13,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,10,12,13,0,0,0,
+		0,4,8,9,10,11,12,13,0,0,0,0,0,0,0,0, 0,1,4,8,9,10,11,12,13,0,0,0,0,0,0,0, 0,1,2,4,8,9,10,11,12,13,0,0,0,0,0,0, 0,1,2,3,4,8,9,10,11,12,13,0,0,0,0,0,
+		0,4,5,8,9,10,11,12,13,0,0,0,0,0,0,0, 0,1,4,5,8,9,10,11,12,13,0,0,0,0,0,0, 0,1,2,4,5,8,9,10,11,12,13,0,0,0,0,0, 0,1,2,3,4,5,8,9,10,11,12,13,0,0,0,0,
+		0,4,5,6,8,9,10,11,12,13,0,0,0,0,0,0, 0,1,4,5,6,8,9,10,11,12,13,0,0,0,0,0, 0,1,2,4,5,6,8,9,10,11,12,13,0,0,0,0, 0,1,2,3,4,5,6,8,9,10,11,12,13,0,0,0,
+		0,4,5,6,7,8,9,10,11,12,13,0,0,0,0,0, 0,1,4,5,6,7,8,9,10,11,12,13,0,0,0,0, 0,1,2,4,5,6,7,8,9,10,11,12,13,0,0,0, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,0,0,
+		0,4,8,12,13,14,0,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,13,14,0,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,13,14,0,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,13,14,0,0,0,0,0,0,0,
+		0,4,5,8,12,13,14,0,0,0,0,0,0,0,0,0, 0,1,4,5,8,12,13,14,0,0,0,0,0,0,0,0, 0,1,2,4,5,8,12,13,14,0,0,0,0,0,0,0, 0,1,2,3,4,5,8,12,13,14,0,0,0,0,0,0,
+		0,4,5,6,8,12,13,14,0,0,0,0,0,0,0,0, 0,1,4,5,6,8,12,13,14,0,0,0,0,0,0,0, 0,1,2,4,5,6,8,12,13,14,0,0,0,0,0,0, 0,1,2,3,4,5,6,8,12,13,14,0,0,0,0,0,
+		0,4,5,6,7,8,12,13,14,0,0,0,0,0,0,0, 0,1,4,5,6,7,8,12,13,14,0,0,0,0,0,0, 0,1,2,4,5,6,7,8,12,13,14,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,12,13,14,0,0,0,0,
+		0,4,8,9,12,13,14,0,0,0,0,0,0,0,0,0, 0,1,4,8,9,12,13,14,0,0,0,0,0,0,0,0, 0,1,2,4,8,9,12,13,14,0,0,0,0,0,0,0, 0,1,2,3,4,8,9,12,13,14,0,0,0,0,0,0,
+		0,4,5,8,9,12,13,14,0,0,0,0,0,0,0,0, 0,1,4,5,8,9,12,13,14,0,0,0,0,0,0,0, 0,1,2,4,5,8,9,12,13,14,0,0,0,0,0,0, 0,1,2,3,4,5,8,9,12,13,14,0,0,0,0,0,
+		0,4,5,6,8,9,12,13,14,0,0,0,0,0,0,0, 0,1,4,5,6,8,9,12,13,14,0,0,0,0,0,0, 0,1,2,4,5,6,8,9,12,13,14,0,0,0,0,0, 0,1,2,3,4,5,6,8,9,12,13,14,0,0,0,0,
+		0,4,5,6,7,8,9,12,13,14,0,0,0,0,0,0, 0,1,4,5,6,7,8,9,12,13,14,0,0,0,0,0, 0,1,2,4,5,6,7,8,9,12,13,14,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,12,13,14,0,0,0,
+		0,4,8,9,10,12,13,14,0,0,0,0,0,0,0,0, 0,1,4,8,9,10,12,13,14,0,0,0,0,0,0,0, 0,1,2,4,8,9,10,12,13,14,0,0,0,0,0,0, 0,1,2,3,4,8,9,10,12,13,14,0,0,0,0,0,
+		0,4,5,8,9,10,12,13,14,0,0,0,0,0,0,0, 0,1,4,5,8,9,10,12,13,14,0,0,0,0,0,0, 0,1,2,4,5,8,9,10,12,13,14,0,0,0,0,0, 0,1,2,3,4,5,8,9,10,12,13,14,0,0,0,0,
+		0,4,5,6,8,9,10,12,13,14,0,0,0,0,0,0, 0,1,4,5,6,8,9,10,12,13,14,0,0,0,0,0, 0,1,2,4,5,6,8,9,10,12,13,14,0,0,0,0, 0,1,2,3,4,5,6,8,9,10,12,13,14,0,0,0,
+		0,4,5,6,7,8,9,10,12,13,14,0,0,0,0,0, 0,1,4,5,6,7,8,9,10,12,13,14,0,0,0,0, 0,1,2,4,5,6,7,8,9,10,12,13,14,0,0,0, 0,1,2,3,4,5,6,7,8,9,10,12,13,14,0,0,
+		0,4,8,9,10,11,12,13,14,0,0,0,0,0,0,0, 0,1,4,8,9,10,11,12,13,14,0,0,0,0,0,0, 0,1,2,4,8,9,10,11,12,13,14,0,0,0,0,0, 0,1,2,3,4,8,9,10,11,12,13,14,0,0,0,0,
+		0,4,5,8,9,10,11,12,13,14,0,0,0,0,0,0, 0,1,4,5,8,9,10,11,12,13,14,0,0,0,0,0, 0,1,2,4,5,8,9,10,11,12,13,14,0,0,0,0, 0,1,2,3,4,5,8,9,10,11,12,13,14,0,0,0,
+		0,4,5,6,8,9,10,11,12,13,14,0,0,0,0,0, 0,1,4,5,6,8,9,10,11,12,13,14,0,0,0,0, 0,1,2,4,5,6,8,9,10,11,12,13,14,0,0,0, 0,1,2,3,4,5,6,8,9,10,11,12,13,14,0,0,
+		0,4,5,6,7,8,9,10,11,12,13,14,0,0,0,0, 0,1,4,5,6,7,8,9,10,11,12,13,14,0,0,0, 0,1,2,4,5,6,7,8,9,10,11,12,13,14,0,0, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0,
+		0,4,8,12,13,14,15,0,0,0,0,0,0,0,0,0, 0,1,4,8,12,13,14,15,0,0,0,0,0,0,0,0, 0,1,2,4,8,12,13,14,15,0,0,0,0,0,0,0, 0,1,2,3,4,8,12,13,14,15,0,0,0,0,0,0,
+		0,4,5,8,12,13,14,15,0,0,0,0,0,0,0,0, 0,1,4,5,8,12,13,14,15,0,0,0,0,0,0,0, 0,1,2,4,5,8,12,13,14,15,0,0,0,0,0,0, 0,1,2,3,4,5,8,12,13,14,15,0,0,0,0,0,
+		0,4,5,6,8,12,13,14,15,0,0,0,0,0,0,0, 0,1,4,5,6,8,12,13,14,15,0,0,0,0,0,0, 0,1,2,4,5,6,8,12,13,14,15,0,0,0,0,0, 0,1,2,3,4,5,6,8,12,13,14,15,0,0,0,0,
+		0,4,5,6,7,8,12,13,14,15,0,0,0,0,0,0, 0,1,4,5,6,7,8,12,13,14,15,0,0,0,0,0, 0,1,2,4,5,6,7,8,12,13,14,15,0,0,0,0, 0,1,2,3,4,5,6,7,8,12,13,14,15,0,0,0,
+		0,4,8,9,12,13,14,15,0,0,0,0,0,0,0,0, 0,1,4,8,9,12,13,14,15,0,0,0,0,0,0,0, 0,1,2,4,8,9,12,13,14,15,0,0,0,0,0,0, 0,1,2,3,4,8,9,12,13,14,15,0,0,0,0,0,
+		0,4,5,8,9,12,13,14,15,0,0,0,0,0,0,0, 0,1,4,5,8,9,12,13,14,15,0,0,0,0,0,0, 0,1,2,4,5,8,9,12,13,14,15,0,0,0,0,0, 0,1,2,3,4,5,8,9,12,13,14,15,0,0,0,0,
+		0,4,5,6,8,9,12,13,14,15,0,0,0,0,0,0, 0,1,4,5,6,8,9,12,13,14,15,0,0,0,0,0, 0,1,2,4,5,6,8,9,12,13,14,15,0,0,0,0, 0,1,2,3,4,5,6,8,9,12,13,14,15,0,0,0,
+		0,4,5,6,7,8,9,12,13,14,15,0,0,0,0,0, 0,1,4,5,6,7,8,9,12,13,14,15,0,0,0,0, 0,1,2,4,5,6,7,8,9,12,13,14,15,0,0,0, 0,1,2,3,4,5,6,7,8,9,12,13,14,15,0,0,
+		0,4,8,9,10,12,13,14,15,0,0,0,0,0,0,0, 0,1,4,8,9,10,12,13,14,15,0,0,0,0,0,0, 0,1,2,4,8,9,10,12,13,14,15,0,0,0,0,0, 0,1,2,3,4,8,9,10,12,13,14,15,0,0,0,0,
+		0,4,5,8,9,10,12,13,14,15,0,0,0,0,0,0, 0,1,4,5,8,9,10,12,13,14,15,0,0,0,0,0, 0,1,2,4,5,8,9,10,12,13,14,15,0,0,0,0, 0,1,2,3,4,5,8,9,10,12,13,14,15,0,0,0,
+		0,4,5,6,8,9,10,12,13,14,15,0,0,0,0,0, 0,1,4,5,6,8,9,10,12,13,14,15,0,0,0,0, 0,1,2,4,5,6,8,9,10,12,13,14,15,0,0,0, 0,1,2,3,4,5,6,8,9,10,12,13,14,15,0,0,
+		0,4,5,6,7,8,9,10,12,13,14,15,0,0,0,0, 0,1,4,5,6,7,8,9,10,12,13,14,15,0,0,0, 0,1,2,4,5,6,7,8,9,10,12,13,14,15,0,0, 0,1,2,3,4,5,6,7,8,9,10,12,13,14,15,0,
+		0,4,8,9,10,11,12,13,14,15,0,0,0,0,0,0, 0,1,4,8,9,10,11,12,13,14,15,0,0,0,0,0, 0,1,2,4,8,9,10,11,12,13,14,15,0,0,0,0, 0,1,2,3,4,8,9,10,11,12,13,14,15,0,0,0,
+		0,4,5,8,9,10,11,12,13,14,15,0,0,0,0,0, 0,1,4,5,8,9,10,11,12,13,14,15,0,0,0,0, 0,1,2,4,5,8,9,10,11,12,13,14,15,0,0,0, 0,1,2,3,4,5,8,9,10,11,12,13,14,15,0,0,
+		0,4,5,6,8,9,10,11,12,13,14,15,0,0,0,0, 0,1,4,5,6,8,9,10,11,12,13,14,15,0,0,0, 0,1,2,4,5,6,8,9,10,11,12,13,14,15,0,0, 0,1,2,3,4,5,6,8,9,10,11,12,13,14,15,0,
+		0,4,5,6,7,8,9,10,11,12,13,14,15,0,0,0, 0,1,4,5,6,7,8,9,10,11,12,13,14,15,0,0, 0,1,2,4,5,6,7,8,9,10,11,12,13,14,15,0, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+	};
+	int writer_len[256] = { 4, 5, 6, 7, 5, 6, 7, 8, 6, 7, 8, 9, 7, 8, 9, 10, 5, 6, 7, 8, 6, 7, 8, 9, 7, 8, 9, 10, 8, 9, 10, 11, 6, 7, 8, 9, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 5, 6, 7, 8, 6, 7, 8, 9, 7, 8, 9, 10, 8, 9, 10, 11, 6, 7, 8, 9, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 6, 7, 8, 9, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 12, 13, 14, 15, 7, 8, 9, 10, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 8, 9, 10, 11, 9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 12, 13, 14, 15, 10, 11, 12, 13, 11, 12, 13, 14, 12, 13, 14, 15, 13, 14, 15, 16 };
+
+	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, masker, working, working2, working3;
+	__m128i zero=_mm_setzero_si128(), num1, num2, num3, num4, num8, num24, num32, num64, num247;
+	__m128i max, rshuf, gshuf, bshuf, blend1, blend2;
+	__m128i res0, res1, res2, res3, op1, op2, op3, op4;
+	__m128i opuse;
+	int p=*pp, lut_index;
+	unsigned int px_pos;
+
+	//constants
+	num1=_mm_set1_epi8(1);
+	num2=_mm_set1_epi8(2);
+	num3=_mm_set1_epi8(3);
+	num4=_mm_set1_epi8(4);
+	num8=_mm_set1_epi8(8);
+	num24=_mm_set1_epi8(24);
+	num32=_mm_set1_epi8(32);
+	num64=_mm_set1_epi8(64);
+	num247=_mm_set1_epi8(247);
+	rshuf=_mm_setr_epi8(0,3,6,9,12,15, 2,5,8,11,14, 1,4,7,10,13);
+	gshuf=_mm_setr_epi8(1,4,7,10,13, 0,3,6,9,12,15, 2,5,8,11,14);
+	bshuf=_mm_setr_epi8(2,5,8,11,14, 1,4,7,10,13, 0,3,6,9,12,15);
+	blend1=_mm_setr_epi8(0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,0);
+	blend2=_mm_setr_epi8(0,255,0,0,255,0,0,255,0,0,255,0,0,255,0,0);
+	max=_mm_set1_epi8(0xff);
+
+	//previous pixel
+	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
+	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
+		//load and diff next 16 pixels
+		LOAD16(aa, da, cc, 0);
+		LOAD16(bb, db, aa, 16);
+		LOAD16(cc, dc, bb, 32);
+		//da, db, dc are interleaved vr, vg, vb
+
+		//convert to rgb vectors
+		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
+		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
+		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
+
+		//convert vr, vb to vg_r, vg_b respectively
+		r=_mm_sub_epi8(r, g);
+		b=_mm_sub_epi8(b, g);
+
+		//generate absolute vectors for each of r, g, b, (vg<0)?(-vg)-1:vg;
+		ABSOLUTER(r, ar);
+		ABSOLUTER(g, ag);
+		ABSOLUTER(b, ab);
+
+		//determine how to store pixels
+		// 1 byte if arb<2, ag<4
+		// 2 byte if arb<8, ag<32
+		// 3 byte if argb<64
+		// 4 byte otherwise
+		arb=_mm_or_si128(ar, ab);
+		op1=_mm_subs_epu8(ag, num2);
+		op1=_mm_or_si128(op1, arb);
+		op1=_mm_cmpgt_epi8(num2, op1);//op1
+		op2=_mm_subs_epu8(ag, num24);
+		op2=_mm_or_si128(op2, arb);
+		op2=_mm_cmpgt_epi8(num8, op2);//op1|op2
+		op3=_mm_cmpgt_epi8(num64, _mm_or_si128(arb, ag));//op1|op2|op3
+		op4=_mm_andnot_si128(op3, max);//op4
+		op3=_mm_sub_epi8(op3, op2);//op3
+		op2=_mm_sub_epi8(op2, op1);//op2
+
+		res0=_mm_setzero_si128();
+		res1=_mm_setzero_si128();
+		res2=_mm_setzero_si128();
+		res3=_mm_setzero_si128();
+
+		//build opcode vector
+		opuse=_mm_and_si128(op2, num1);
+		opuse=_mm_or_si128(opuse, _mm_and_si128(op3, num3));
+		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, num247));
+		//apply opcodes to output
+		working=_mm_unpacklo_epi8(opuse, zero);
+		working2=_mm_unpacklo_epi16(working, zero);
+		res0=_mm_or_si128(working2, res0);
+		working2=_mm_unpackhi_epi16(working, zero);
+		res1=_mm_or_si128(working2, res1);
+		working=_mm_unpackhi_epi8(opuse, zero);
+		working2=_mm_unpacklo_epi16(working, zero);
+		res2=_mm_or_si128(working2, res2);
+		working2=_mm_unpackhi_epi16(working, zero);
+		res3=_mm_or_si128(working2, res3);
+
+		//bbrrggg0
+		NORMALISE_SHIFT16_EMBIGGEN(g, op1, num4, 1);
+		NORMALISE_SHIFT16_EMBIGGEN(r, op1, num2, 4);
+		NORMALISE_SHIFT16_EMBIGGEN(b, op1, num2, 6);
+		//bbbbrrrr gggggg01
+		NORMALISE_SHIFT16_EMBIGGEN(g, op2, num32, 2);
+		NORMALISE_SHIFT16_EMBIGGEN(r, op2, num8, 8);
+		NORMALISE_SHIFT16_EMBIGGEN(b, op2, num8, 12);
+		//bbbbbbbr rrrrrrgg ggggg011
+		NORMALISE_SHIFT16_EMBIGGEN(g, op3, num64, 3);
+		NORMALISE_SHIFT32_EMBIGGEN(r, op3, num64, 10);
+		NORMALISE_SHIFT32_EMBIGGEN(b, op3, num64, 17);
+		//bbbbbbbb rrrrrrrr gggggggg 11110111
+		//shift op4 g
+		working=_mm_and_si128(g, op4);
+		working2=_mm_unpacklo_epi8(zero, working);//switched to end up at 2nd byte posiiton
+		working3=_mm_unpacklo_epi16(working2, zero);
+		res0=_mm_or_si128(working3, res0);
+		working3=_mm_unpackhi_epi16(working2, zero);
+		res1=_mm_or_si128(working3, res1);
+		working2=_mm_unpackhi_epi8(zero, working);//switched
+		working3=_mm_unpacklo_epi16(working2, zero);
+		res2=_mm_or_si128(working3, res2);
+		working3=_mm_unpackhi_epi16(working2, zero);
+		res3=_mm_or_si128(working3, res3);
+		//shift op4 r
+		working=_mm_and_si128(r, op4);
+		working2=_mm_unpacklo_epi8(working, zero);
+		working3=_mm_unpacklo_epi16(zero, working2);//switch
+		res0=_mm_or_si128(working3, res0);
+		working3=_mm_unpackhi_epi16(zero, working2);//switch
+		res1=_mm_or_si128(working3, res1);
+		working2=_mm_unpackhi_epi8(working, zero);
+		working3=_mm_unpacklo_epi16(zero, working2);//switch
+		res2=_mm_or_si128(working3, res2);
+		working3=_mm_unpackhi_epi16(zero, working2);//switch
+		res3=_mm_or_si128(working3, res3);
+		//shift op4 b
+		working=_mm_and_si128(b, op4);
+		working2=_mm_unpacklo_epi8(zero, working);//switch
+		working3=_mm_unpacklo_epi16(zero, working2);//switch
+		res0=_mm_or_si128(working3, res0);
+		working3=_mm_unpackhi_epi16(zero, working2);//switch
+		res1=_mm_or_si128(working3, res1);
+		working2=_mm_unpackhi_epi8(zero, working);//switch
+		working3=_mm_unpacklo_epi16(zero, working2);//switch
+		res2=_mm_or_si128(working3, res2);
+		working3=_mm_unpackhi_epi16(zero, working2);//switch
+		res3=_mm_or_si128(working3, res3);
+
+		//get lut for first 8 pixels
+		masker=_mm_unpacklo_epi8(op2, zero);
+		working=_mm_unpacklo_epi8(zero, op3);
+		masker=_mm_or_si128(masker, working);
+		working=_mm_unpacklo_epi8(op4, op4);
+		masker=_mm_or_si128(masker, working);
+		lut_index=_mm_movemask_epi8(masker);
+
+		//write first vec
+		working=_mm_loadu_si128((__m128i const*)(writer_lut)+((lut_index)&255));
+		working=_mm_shuffle_epi8(res0, working);
+		_mm_storeu_si128((__m128i*)(bytes+p), working);
+		p+=writer_len[(lut_index)&255];
+		//write second vec
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255));
+		working=_mm_shuffle_epi8(res1, working);
+		_mm_storeu_si128((__m128i*)(bytes+p), working);
+		p+=writer_len[(lut_index>>8)&255];
+
+		//get lut for next 8 pixels
+		masker=_mm_unpackhi_epi8(op2, zero);
+		working=_mm_unpackhi_epi8(zero, op3);
+		masker=_mm_or_si128(masker, working);
+		working=_mm_unpackhi_epi8(op4, op4);
+		masker=_mm_or_si128(masker, working);
+		lut_index=_mm_movemask_epi8(masker);
+
+		//write third vec
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index)&255));
+		working=_mm_shuffle_epi8(res2, working);
+		_mm_storeu_si128((__m128i*)(bytes+p), working);
+		p+=writer_len[(lut_index)&255];
+		//write fourth vec
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255));
+		working=_mm_shuffle_epi8(res3, working);
+		_mm_storeu_si128((__m128i*)(bytes+p), working);
+		p+=writer_len[(lut_index>>8)&255];
+	}
+	_mm_storeu_si128((__m128i*)prevdump, cc);
+	pixel_prev->rgba.r=prevdump[13];
+	pixel_prev->rgba.g=prevdump[14];
+	pixel_prev->rgba.b=prevdump[15];
+	*pp=p;
+}
+#else
+	//not compiled with QOI_SSE, replace implemented sse functions with scalar placeholders
+static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk3_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
+#endif
+
+//implement missing sse functions TODO
+static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
+static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
+static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk4_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
+
+
+//Optimised decode functions////////////////////////////////////////////////////
+
+#define QOI_DECODE_COMMON \
+	int b1 = s->bytes[s->b++]; \
+	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
+		int vg = ((b1>>1)&7) - 6; \
+		s->px.rgba.r += vg + ((b1 >> 4) & 3); \
+		s->px.rgba.g += vg + 2; \
+		s->px.rgba.b += vg + ((b1 >> 6) & 3); \
+	} \
+	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
+		int b2=s->bytes[s->b++]; \
+		int vg = ((b1>>2)&63) - 40; \
+		s->px.rgba.r += vg + ((b2     ) & 0x0f); \
+		s->px.rgba.g += vg + 8; \
+		s->px.rgba.b += vg + ((b2 >>4) & 0x0f); \
+	} \
+	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
+		int b2=s->bytes[s->b++]; \
+		int b3=s->bytes[s->b++]; \
+		int vg = (((b2&3)<<5)|((b1>>3)&31))-128; \
+		s->px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
+		s->px.rgba.g += vg + 64; \
+		s->px.rgba.b += vg + ((b3>>1)&127); \
+	}
+
+#define QOI_DECODE_COMMONA_2 \
+	else if (b1 == QOI_OP_RGB) { \
+		signed char vg=s->bytes[s->b++]; \
+		signed char b3=s->bytes[s->b++]; \
+		signed char b4=s->bytes[s->b++]; \
+		s->px.rgba.r += vg + b3; \
+		s->px.rgba.g += vg; \
+		s->px.rgba.b += vg + b4; \
+	}
+
+#define QOI_DECODE_COMMONB_2 \
+	else { \
+		signed char vg=s->bytes[s->b++]; \
+		signed char b3=s->bytes[s->b++]; \
+		signed char b4=s->bytes[s->b++]; \
+		s->px.rgba.r += vg + b3; \
+		s->px.rgba.g += vg; \
+		s->px.rgba.b += vg + b4; \
+	} \
+	s->pixels[s->px_pos + 0] = s->px.rgba.r; \
+	s->pixels[s->px_pos + 1] = s->px.rgba.g; \
+	s->pixels[s->px_pos + 2] = s->px.rgba.b;
+
+#define QOI_DECODE_COMMONA \
+	QOI_DECODE_COMMON \
+	QOI_DECODE_COMMONA_2
+
+#define QOI_DECODE_COMMONB \
+	QOI_DECODE_COMMON \
+	QOI_DECODE_COMMONB_2
+
+static void dec_in4out4(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			OP_RGBA_GOTO:
+			QOI_DECODE_COMMONA
+			else if (b1 == QOI_OP_RGBA) {
+				s->px.rgba.a = s->bytes[s->b++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in4out3(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			OP_RGBA_GOTO:
+			QOI_DECODE_COMMONA
+			else if (b1 == QOI_OP_RGBA) {
+				s->px.rgba.a = s->bytes[s->b++];
+				goto OP_RGBA_GOTO;
+			}
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in3out4(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			QOI_DECODE_COMMONA
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in3out3(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		if (s->run)
+			s->run--;
+		else{
+			QOI_DECODE_COMMONA
+			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+				s->run = ((b1>>3) & 0x1f);
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in4out4_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMONA
+		else if (b1 == QOI_OP_RGBA) {
+			s->px.rgba.a = s->bytes[s->b++];
+			goto OP_RGBA_GOTO;
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in4out3_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		OP_RGBA_GOTO:
+		QOI_DECODE_COMMONA
+		else if (b1 == QOI_OP_RGBA) {
+			s->px.rgba.a = s->bytes[s->b++];
+			goto OP_RGBA_GOTO;
+		}
+		s->pixels[s->px_pos + 0] = s->px.rgba.r;
+		s->pixels[s->px_pos + 1] = s->px.rgba.g;
+		s->pixels[s->px_pos + 2] = s->px.rgba.b;
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in3out4_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		QOI_DECODE_COMMONB
+		s->pixels[s->px_pos + 3] = s->px.rgba.a;
+		s->px_pos+=4;
+		s->pixel_curr++;
+	}
+}
+
+static void dec_in3out3_norle(dec_state *s){
+	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
+		QOI_DECODE_COMMONB
+		s->px_pos+=3;
+		s->pixel_curr++;
+	}
+}
