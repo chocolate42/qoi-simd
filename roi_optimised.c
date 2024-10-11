@@ -309,6 +309,138 @@ static const uint8_t writer_len[256] = {
 	9, 10, 11, 12, 10, 11, 12, 13, 11, 12, 13, 14, 12, 13, 14, 15, 10, 11, 12, 13, 11, 12, 13, 14, 12, 13, 14, 15, 13, 14, 15, 16
 };
 
+#define SSE_ENC_RGB_16 do{ \
+		/*convert to rgb vectors*/ \
+		PLANAR_SHUFFLE(r, da, db, dc, rshuf); \
+		PLANAR_SHUFFLE(g, db, dc, da, gshuf); \
+		PLANAR_SHUFFLE(b, dc, da, db, bshuf); \
+		/*convert vr, vb to vg_r, vg_b respectively*/ \
+		r=_mm_sub_epi8(r, g); \
+		b=_mm_sub_epi8(b, g); \
+		/*generate absolute vectors for each of r, g, b, (vg<0)?(-vg)-1:vg;*/ \
+		ABSOLUTER(r, ar); \
+		ABSOLUTER(g, ag); \
+		ABSOLUTER(b, ab); \
+		/*determine how to store pixels*/ \
+		/* 1 byte if arb<2, ag<4*/ \
+		/* 2 byte if arb<8, ag<32*/ \
+		/* 3 byte if argb<64*/ \
+		/* 4 byte otherwise*/ \
+		arb=_mm_or_si128(ar, ab); \
+		op1=_mm_subs_epu8(ag, _mm_set1_epi8(2)); \
+		op1=_mm_or_si128(op1, arb); \
+		op1=_mm_cmpgt_epi8(_mm_set1_epi8(2), op1);/*op1*/ \
+		op2=_mm_subs_epu8(ag, _mm_set1_epi8(24)); \
+		op2=_mm_or_si128(op2, arb); \
+		op2=_mm_cmpgt_epi8(_mm_set1_epi8(8), op2);/*op1|op2*/ \
+		op3=_mm_cmpgt_epi8(_mm_set1_epi8(64), _mm_or_si128(arb, ag));/*op1|op2|op3*/ \
+		op4=_mm_andnot_si128(op3, _mm_set1_epi8(0xff));/*op4*/ \
+		op3=_mm_sub_epi8(op3, op2);/*op3*/ \
+		op2=_mm_sub_epi8(op2, op1);/*op2*/ \
+		res0=_mm_setzero_si128(); \
+		res1=_mm_setzero_si128(); \
+		res2=_mm_setzero_si128(); \
+		res3=_mm_setzero_si128(); \
+		/*build opcode vector*/ \
+		opuse=_mm_and_si128(op2, _mm_set1_epi8(1)); \
+		opuse=_mm_or_si128(opuse, _mm_and_si128(op3, _mm_set1_epi8(3))); \
+		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, _mm_set1_epi8(247))); \
+		/*apply opcodes to output*/ \
+		working=_mm_unpacklo_epi8(opuse, _mm_setzero_si128()); \
+		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128()); \
+		res0=_mm_or_si128(working2, res0); \
+		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128()); \
+		res1=_mm_or_si128(working2, res1); \
+		working=_mm_unpackhi_epi8(opuse, _mm_setzero_si128()); \
+		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128()); \
+		res2=_mm_or_si128(working2, res2); \
+		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128()); \
+		res3=_mm_or_si128(working2, res3); \
+		/*bbrrggg0*/ \
+		NORMALISE_SHIFT16_EMBIGGEN(g, op1, _mm_set1_epi8(4), 1); \
+		NORMALISE_SHIFT16_EMBIGGEN(r, op1, _mm_set1_epi8(2), 4); \
+		NORMALISE_SHIFT16_EMBIGGEN(b, op1, _mm_set1_epi8(2), 6); \
+		/*bbbbrrrr gggggg01*/ \
+		NORMALISE_SHIFT16_EMBIGGEN(g, op2, _mm_set1_epi8(32), 2); \
+		NORMALISE_SHIFT16_EMBIGGEN(r, op2, _mm_set1_epi8(8), 8); \
+		NORMALISE_SHIFT16_EMBIGGEN(b, op2, _mm_set1_epi8(8), 12); \
+		/*bbbbbbbr rrrrrrgg ggggg011*/ \
+		NORMALISE_SHIFT16_EMBIGGEN(g, op3, _mm_set1_epi8(64), 3); \
+		NORMALISE_SHIFT32_EMBIGGEN(r, op3, _mm_set1_epi8(64), 10); \
+		NORMALISE_SHIFT32_EMBIGGEN(b, op3, _mm_set1_epi8(64), 17); \
+		/*bbbbbbbb rrrrrrrr gggggggg 11110111*/ \
+		/*shift op4 g*/ \
+		working=_mm_and_si128(g, op4); \
+		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);/*switched to end up at 2nd byte posiiton*/ \
+		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
+		res0=_mm_or_si128(working3, res0); \
+		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
+		res1=_mm_or_si128(working3, res1); \
+		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);/*switched*/ \
+		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
+		res2=_mm_or_si128(working3, res2); \
+		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
+		res3=_mm_or_si128(working3, res3); \
+		/*shift op4 r*/ \
+		working=_mm_and_si128(r, op4); \
+		working2=_mm_unpacklo_epi8(working, _mm_setzero_si128()); \
+		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res0=_mm_or_si128(working3, res0); \
+		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res1=_mm_or_si128(working3, res1); \
+		working2=_mm_unpackhi_epi8(working, _mm_setzero_si128()); \
+		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res2=_mm_or_si128(working3, res2); \
+		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res3=_mm_or_si128(working3, res3); \
+		/*shift op4 b*/ \
+		working=_mm_and_si128(b, op4); \
+		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);/*switch*/ \
+		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res0=_mm_or_si128(working3, res0); \
+		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res1=_mm_or_si128(working3, res1); \
+		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);/*switch*/ \
+		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res2=_mm_or_si128(working3, res2); \
+		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
+		res3=_mm_or_si128(working3, res3); \
+		/*get lut for first 8 pixels*/ \
+		working2=_mm_unpacklo_epi8(op2, _mm_setzero_si128()); \
+		working=_mm_unpacklo_epi8(_mm_setzero_si128(), op3); \
+		working2=_mm_or_si128(working2, working); \
+		working=_mm_unpacklo_epi8(op4, op4); \
+		working2=_mm_or_si128(working2, working); \
+		lut_index=_mm_movemask_epi8(working2); \
+		/*write first vec*/ \
+		working=_mm_loadu_si128((__m128i const*)(writer_lut)+((lut_index)&255)); \
+		working=_mm_shuffle_epi8(res0, working); \
+		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		p+=writer_len[(lut_index)&255]; \
+		/*write second vec*/ \
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
+		working=_mm_shuffle_epi8(res1, working); \
+		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		p+=writer_len[(lut_index>>8)&255]; \
+		/*get lut for next 8 pixels*/ \
+		working2=_mm_unpackhi_epi8(op2, _mm_setzero_si128()); \
+		working=_mm_unpackhi_epi8(_mm_setzero_si128(), op3); \
+		working2=_mm_or_si128(working2, working); \
+		working=_mm_unpackhi_epi8(op4, op4); \
+		working2=_mm_or_si128(working2, working); \
+		lut_index=_mm_movemask_epi8(working2); \
+		/*write third vec*/ \
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index)&255)); \
+		working=_mm_shuffle_epi8(res2, working); \
+		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		p+=writer_len[(lut_index)&255]; \
+		/*write fourth vec*/ \
+		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
+		working=_mm_shuffle_epi8(res3, working); \
+		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		p+=writer_len[(lut_index>>8)&255]; \
+}while(0)
+
 static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
 	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, working, working2, working3;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
@@ -332,145 +464,45 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 		LOAD16(bb, db, aa, 16);
 		LOAD16(cc, dc, bb, 32);
 
-		//convert to rgb vectors
-		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
-		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
-		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
+		SSE_ENC_RGB_16;
+	}
+	_mm_storeu_si128((__m128i*)prevdump, cc);
+	pixel_prev->rgba.r=prevdump[13];
+	pixel_prev->rgba.g=prevdump[14];
+	pixel_prev->rgba.b=prevdump[15];
+	*pp=p;
+}
 
-		//convert vr, vb to vg_r, vg_b respectively
-		r=_mm_sub_epi8(r, g);
-		b=_mm_sub_epi8(b, g);
+static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
+	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, working, working2, working3;
+	__m128i rshuf, gshuf, bshuf, blend1, blend2;
+	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
+	int p=*pp, lut_index;
+	unsigned char prevdump[16];
+	unsigned int px_pos;
 
-		//generate absolute vectors for each of r, g, b, (vg<0)?(-vg)-1:vg;
-		ABSOLUTER(r, ar);
-		ABSOLUTER(g, ag);
-		ABSOLUTER(b, ab);
+	//constants
+	rshuf=_mm_setr_epi8(0,3,6,9,12,15, 2,5,8,11,14, 1,4,7,10,13);
+	gshuf=_mm_setr_epi8(1,4,7,10,13, 0,3,6,9,12,15, 2,5,8,11,14);
+	bshuf=_mm_setr_epi8(2,5,8,11,14, 1,4,7,10,13, 0,3,6,9,12,15);
+	blend1=_mm_setr_epi8(0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,0);
+	blend2=_mm_setr_epi8(0,255,0,0,255,0,0,255,0,0,255,0,0,255,0,0);
 
-		//determine how to store pixels
-		// 1 byte if arb<2, ag<4
-		// 2 byte if arb<8, ag<32
-		// 3 byte if argb<64
-		// 4 byte otherwise
-		arb=_mm_or_si128(ar, ab);
-		op1=_mm_subs_epu8(ag, _mm_set1_epi8(2));
-		op1=_mm_or_si128(op1, arb);
-		op1=_mm_cmpgt_epi8(_mm_set1_epi8(2), op1);//op1
-		op2=_mm_subs_epu8(ag, _mm_set1_epi8(24));
-		op2=_mm_or_si128(op2, arb);
-		op2=_mm_cmpgt_epi8(_mm_set1_epi8(8), op2);//op1|op2
-		op3=_mm_cmpgt_epi8(_mm_set1_epi8(64), _mm_or_si128(arb, ag));//op1|op2|op3
-		op4=_mm_andnot_si128(op3, _mm_set1_epi8(0xff));//op4
-		op3=_mm_sub_epi8(op3, op2);//op3
-		op2=_mm_sub_epi8(op2, op1);//op2
+	//previous pixel
+	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
+	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
+		//load and diff next 16 pixels
+		LOAD16(aa, da, cc, 0);
+		LOAD16(bb, db, aa, 16);
+		LOAD16(cc, dc, bb, 32);
 
-		res0=_mm_setzero_si128();
-		res1=_mm_setzero_si128();
-		res2=_mm_setzero_si128();
-		res3=_mm_setzero_si128();
-
-		//build opcode vector
-		opuse=_mm_and_si128(op2, _mm_set1_epi8(1));
-		opuse=_mm_or_si128(opuse, _mm_and_si128(op3, _mm_set1_epi8(3)));
-		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, _mm_set1_epi8(247)));
-		//apply opcodes to output
-		working=_mm_unpacklo_epi8(opuse, _mm_setzero_si128());
-		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128());
-		res0=_mm_or_si128(working2, res0);
-		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128());
-		res1=_mm_or_si128(working2, res1);
-		working=_mm_unpackhi_epi8(opuse, _mm_setzero_si128());
-		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128());
-		res2=_mm_or_si128(working2, res2);
-		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128());
-		res3=_mm_or_si128(working2, res3);
-
-		//bbrrggg0
-		NORMALISE_SHIFT16_EMBIGGEN(g, op1, _mm_set1_epi8(4), 1);
-		NORMALISE_SHIFT16_EMBIGGEN(r, op1, _mm_set1_epi8(2), 4);
-		NORMALISE_SHIFT16_EMBIGGEN(b, op1, _mm_set1_epi8(2), 6);
-		//bbbbrrrr gggggg01
-		NORMALISE_SHIFT16_EMBIGGEN(g, op2, _mm_set1_epi8(32), 2);
-		NORMALISE_SHIFT16_EMBIGGEN(r, op2, _mm_set1_epi8(8), 8);
-		NORMALISE_SHIFT16_EMBIGGEN(b, op2, _mm_set1_epi8(8), 12);
-		//bbbbbbbr rrrrrrgg ggggg011
-		NORMALISE_SHIFT16_EMBIGGEN(g, op3, _mm_set1_epi8(64), 3);
-		NORMALISE_SHIFT32_EMBIGGEN(r, op3, _mm_set1_epi8(64), 10);
-		NORMALISE_SHIFT32_EMBIGGEN(b, op3, _mm_set1_epi8(64), 17);
-		//bbbbbbbb rrrrrrrr gggggggg 11110111
-		//shift op4 g
-		working=_mm_and_si128(g, op4);
-		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);//switched to end up at 2nd byte posiiton
-		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128());
-		res0=_mm_or_si128(working3, res0);
-		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128());
-		res1=_mm_or_si128(working3, res1);
-		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);//switched
-		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128());
-		res2=_mm_or_si128(working3, res2);
-		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128());
-		res3=_mm_or_si128(working3, res3);
-		//shift op4 r
-		working=_mm_and_si128(r, op4);
-		working2=_mm_unpacklo_epi8(working, _mm_setzero_si128());
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);//switch
-		res0=_mm_or_si128(working3, res0);
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);//switch
-		res1=_mm_or_si128(working3, res1);
-		working2=_mm_unpackhi_epi8(working, _mm_setzero_si128());
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);//switch
-		res2=_mm_or_si128(working3, res2);
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);//switch
-		res3=_mm_or_si128(working3, res3);
-		//shift op4 b
-		working=_mm_and_si128(b, op4);
-		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);//switch
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);//switch
-		res0=_mm_or_si128(working3, res0);
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);//switch
-		res1=_mm_or_si128(working3, res1);
-		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);//switch
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);//switch
-		res2=_mm_or_si128(working3, res2);
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);//switch
-		res3=_mm_or_si128(working3, res3);
-
-		//get lut for first 8 pixels
-		working2=_mm_unpacklo_epi8(op2, _mm_setzero_si128());
-		working=_mm_unpacklo_epi8(_mm_setzero_si128(), op3);
-		working2=_mm_or_si128(working2, working);
-		working=_mm_unpacklo_epi8(op4, op4);
-		working2=_mm_or_si128(working2, working);
-		lut_index=_mm_movemask_epi8(working2);
-
-		//write first vec
-		working=_mm_loadu_si128((__m128i const*)(writer_lut)+((lut_index)&255));
-		working=_mm_shuffle_epi8(res0, working);
-		_mm_storeu_si128((__m128i*)(bytes+p), working);
-		p+=writer_len[(lut_index)&255];
-		//write second vec
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255));
-		working=_mm_shuffle_epi8(res1, working);
-		_mm_storeu_si128((__m128i*)(bytes+p), working);
-		p+=writer_len[(lut_index>>8)&255];
-
-		//get lut for next 8 pixels
-		working2=_mm_unpackhi_epi8(op2, _mm_setzero_si128());
-		working=_mm_unpackhi_epi8(_mm_setzero_si128(), op3);
-		working2=_mm_or_si128(working2, working);
-		working=_mm_unpackhi_epi8(op4, op4);
-		working2=_mm_or_si128(working2, working);
-		lut_index=_mm_movemask_epi8(working2);
-
-		//write third vec
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index)&255));
-		working=_mm_shuffle_epi8(res2, working);
-		_mm_storeu_si128((__m128i*)(bytes+p), working);
-		p+=writer_len[(lut_index)&255];
-		//write fourth vec
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255));
-		working=_mm_shuffle_epi8(res3, working);
-		_mm_storeu_si128((__m128i*)(bytes+p), working);
-		p+=writer_len[(lut_index>>8)&255];
+		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){
+			//run of 16
+			bytes[p++]=QOI_OP_RUN | ((16 - 1)<<3);
+		}
+		else{
+			SSE_ENC_RGB_16;
+		}
 	}
 	_mm_storeu_si128((__m128i*)prevdump, cc);
 	pixel_prev->rgba.r=prevdump[13];
@@ -483,19 +515,18 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk3_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
+static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
 #endif
 
 //implement missing sse functions TODO
 static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
-static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
-}
 static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk4_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
-
 
 //Optimised decode functions////////////////////////////////////////////////////
 
