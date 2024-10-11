@@ -294,7 +294,7 @@ static void qoi_write_32(unsigned char *bytes, int *p, unsigned int v) {
 	bytes[(*p)++] = (0x000000ff & v);
 }
 
-static unsigned int qoi_read_32(const unsigned char *bytes, int *p) {
+static unsigned int qoi_read_32(const unsigned char *bytes, unsigned int *p) {
 	unsigned int a = bytes[(*p)++];
 	unsigned int b = bytes[(*p)++];
 	unsigned int c = bytes[(*p)++];
@@ -337,6 +337,8 @@ static void (*enc_finish_arr[])(const unsigned char*, unsigned char*, int*, unsi
 	qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar
 };
 
+static void (*decode_arr[])(dec_state*)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
+
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
 	int i, max_size, p=0, run=0;
 	unsigned char *bytes;
@@ -373,8 +375,6 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 	*out_len = p;
 	return bytes;
 }
-
-static void (*decode_arr[])(dec_state*)={dec_in4out4, dec_in4out3, dec_in3out4, dec_in3out3, dec_in4out4_norle, dec_in4out3_norle, dec_in3out4_norle, dec_in3out3_norle};
 
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	unsigned int header_magic;
@@ -545,6 +545,12 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	PPM_SPACE_NUM(width);
 	PPM_SPACE_NUM(height);
 	PPM_SPACE_NUM(maxval);
+	if(t=='#'){//comment
+		while((t!='\n') && (t!='\r')){
+			if(1!=fread(&t, 1, 1, fi))
+				goto BADEXIT2;
+		}
+	}
 	if(!isspace(t))
 		goto BADEXIT2;
 	if(maxval>255)//multi-byte not supported
