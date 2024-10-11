@@ -26,6 +26,15 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	b[(*p)++] = (x >> 24)&255;
 }
 
+#define DUMP_RUN(rrr) do{ \
+	for(;rrr>=30;rrr-=30) \
+		bytes[p++] = QOI_OP_RUN30; \
+	if (rrr) { \
+		bytes[p++] = QOI_OP_RUN | ((rrr - 1)<<3); \
+		rrr = 0; \
+	} \
+}while(0)
+
 #define RGB_ENC_SCALAR do{\
 	signed char vr = px.rgba.r - px_prev.rgba.r;\
 	signed char vg = px.rgba.g - px_prev.rgba.g;\
@@ -72,12 +81,7 @@ static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char 
 			px.rgba.g = pixels[px_pos + 1];
 			px.rgba.b = pixels[px_pos + 2];
 		}
-		for(;run>=30;run-=30)
-			bytes[p++] = QOI_OP_RUN30;
-		if (run) {
-			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
-			run = 0;
-		}
+		DUMP_RUN(run);
 		RGB_ENC_SCALAR;
 		px_prev = px;
 	}
@@ -126,12 +130,7 @@ static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char 
 			px.rgba.b = pixels[px_pos + 2];
 			px.rgba.a = pixels[px_pos + 3];
 		}
-		for(;run>=30;run-=30)
-			bytes[p++] = QOI_OP_RUN30;
-		if (run) {
-			bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
-			run = 0;
-		}
+		DUMP_RUN(run);
 		if(px.rgba.a!=px_prev.rgba.a){
 			bytes[p++] = QOI_OP_RGBA;
 			bytes[p++] = px.rgba.a;
@@ -167,10 +166,18 @@ static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned
 
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
-#define LOAD16(raw, diff, prev, offset) do{ \
+#define LOAD16_RGB(raw, diff, prev, offset) do{ \
 	raw=_mm_loadu_si128((__m128i const*)(pixels+px_pos+offset)); \
 	diff=_mm_slli_si128(raw, 3); \
 	prev=_mm_srli_si128(prev, 13); \
+	diff=_mm_or_si128(diff, prev); \
+	diff=_mm_sub_epi8(raw, diff); \
+}while(0)
+
+#define LOAD16_RGBA(raw, diff, prev, offset) do{ \
+	raw=_mm_loadu_si128((__m128i const*)(pixels+px_pos+offset)); \
+	diff=_mm_slli_si128(raw, 4); \
+	prev=_mm_srli_si128(prev, 12); \
 	diff=_mm_or_si128(diff, prev); \
 	diff=_mm_sub_epi8(raw, diff); \
 }while(0)
@@ -460,9 +467,9 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
 	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
 		//load and diff next 16 pixels
-		LOAD16(aa, da, cc, 0);
-		LOAD16(bb, db, aa, 16);
-		LOAD16(cc, dc, bb, 32);
+		LOAD16_RGB(aa, da, cc, 0);
+		LOAD16_RGB(bb, db, aa, 16);
+		LOAD16_RGB(cc, dc, bb, 32);
 
 		SSE_ENC_RGB_16;
 	}
@@ -477,7 +484,7 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, working, working2, working3;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
-	int p=*pp, lut_index;
+	int p=*pp, lut_index, run=*rr;
 	unsigned char prevdump[16];
 	unsigned int px_pos;
 
@@ -492,23 +499,24 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
 	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
 		//load and diff next 16 pixels
-		LOAD16(aa, da, cc, 0);
-		LOAD16(bb, db, aa, 16);
-		LOAD16(cc, dc, bb, 32);
+		LOAD16_RGB(aa, da, cc, 0);
+		LOAD16_RGB(bb, db, aa, 16);
+		LOAD16_RGB(cc, dc, bb, 32);
 
-		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){
-			//run of 16
-			bytes[p++]=QOI_OP_RUN | ((16 - 1)<<3);
-		}
+		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff)))
+			run+=16;
 		else{
+			DUMP_RUN(run);
 			SSE_ENC_RGB_16;
 		}
 	}
+	DUMP_RUN(run);
 	_mm_storeu_si128((__m128i*)prevdump, cc);
 	pixel_prev->rgba.r=prevdump[13];
 	pixel_prev->rgba.g=prevdump[14];
 	pixel_prev->rgba.b=prevdump[15];
 	*pp=p;
+	*rr=run;
 }
 #else
 	//not compiled with QOI_SSE, replace implemented sse functions with scalar placeholders
