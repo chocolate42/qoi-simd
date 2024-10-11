@@ -166,18 +166,10 @@ static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned
 
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
-#define LOAD16_RGB(raw, diff, prev, offset) do{ \
+#define LOAD16(raw, diff, prev, offset, lshift, rshift) do{ \
 	raw=_mm_loadu_si128((__m128i const*)(pixels+px_pos+offset)); \
-	diff=_mm_slli_si128(raw, 3); \
-	prev=_mm_srli_si128(prev, 13); \
-	diff=_mm_or_si128(diff, prev); \
-	diff=_mm_sub_epi8(raw, diff); \
-}while(0)
-
-#define LOAD16_RGBA(raw, diff, prev, offset) do{ \
-	raw=_mm_loadu_si128((__m128i const*)(pixels+px_pos+offset)); \
-	diff=_mm_slli_si128(raw, 4); \
-	prev=_mm_srli_si128(prev, 12); \
+	diff=_mm_slli_si128(raw, lshift); \
+	prev=_mm_srli_si128(prev, rshift); \
 	diff=_mm_or_si128(diff, prev); \
 	diff=_mm_sub_epi8(raw, diff); \
 }while(0)
@@ -191,11 +183,11 @@ static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned
 
 //do (x<0)?(-x)-1:x for a single plane
 #define ABSOLUTER(plane, absolute) do{ \
-	working2=_mm_cmpgt_epi8(_mm_setzero_si128(), plane); \
-	working=_mm_and_si128(working2, plane); \
-	working=_mm_add_epi8(working, _mm_set1_epi8(1)); \
-	working=_mm_abs_epi8(working); \
-	absolute=_mm_blendv_epi8(plane, working, working2); \
+	w2=_mm_cmpgt_epi8(_mm_setzero_si128(), plane); \
+	w1=_mm_and_si128(w2, plane); \
+	w1=_mm_add_epi8(w1, _mm_set1_epi8(1)); \
+	w1=_mm_abs_epi8(w1); \
+	absolute=_mm_blendv_epi8(plane, w1, w2); \
 }while(0)
 
 //the following 2 macros:
@@ -203,39 +195,39 @@ static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned
 // shift value to where it is in the op
 // combine into 4 result vectors
 #define NORMALISE_SHIFT16_EMBIGGEN(plane, opmask, value, shift) do{ \
-	working=_mm_add_epi8(plane, value); \
-	working=_mm_and_si128(working, opmask); \
-	working2=_mm_unpacklo_epi8(working, _mm_setzero_si128()); \
-	working2=_mm_slli_epi16(working2, shift); \
-	working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-	res0=_mm_or_si128(working3, res0); \
-	working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-	res1=_mm_or_si128(working3, res1); \
-	working2=_mm_unpackhi_epi8(working, _mm_setzero_si128()); \
-	working2=_mm_slli_epi16(working2, shift); \
-	working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-	res2=_mm_or_si128(working3, res2); \
-	working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-	res3=_mm_or_si128(working3, res3); \
+	w1=_mm_add_epi8(plane, value); \
+	w1=_mm_and_si128(w1, opmask); \
+	w2=_mm_unpacklo_epi8(w1, _mm_setzero_si128()); \
+	w2=_mm_slli_epi16(w2, shift); \
+	w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+	res0=_mm_or_si128(w3, res0); \
+	w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+	res1=_mm_or_si128(w3, res1); \
+	w2=_mm_unpackhi_epi8(w1, _mm_setzero_si128()); \
+	w2=_mm_slli_epi16(w2, shift); \
+	w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+	res2=_mm_or_si128(w3, res2); \
+	w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+	res3=_mm_or_si128(w3, res3); \
 }while(0)
 
 #define NORMALISE_SHIFT32_EMBIGGEN(plane, opmask, value, shift) do{ \
-	working=_mm_add_epi8(plane, value); \
-	working=_mm_and_si128(working, opmask); \
-	working2=_mm_unpacklo_epi8(working, _mm_setzero_si128()); \
-	working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-	working3=_mm_slli_epi32(working3, shift); \
-	res0=_mm_or_si128(working3, res0); \
-	working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-	working3=_mm_slli_epi32(working3, shift); \
-	res1=_mm_or_si128(working3, res1); \
-	working2=_mm_unpackhi_epi8(working, _mm_setzero_si128()); \
-	working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-	working3=_mm_slli_epi32(working3, shift); \
-	res2=_mm_or_si128(working3, res2); \
-	working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-	working3=_mm_slli_epi32(working3, shift); \
-	res3=_mm_or_si128(working3, res3); \
+	w1=_mm_add_epi8(plane, value); \
+	w1=_mm_and_si128(w1, opmask); \
+	w2=_mm_unpacklo_epi8(w1, _mm_setzero_si128()); \
+	w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+	w3=_mm_slli_epi32(w3, shift); \
+	res0=_mm_or_si128(w3, res0); \
+	w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+	w3=_mm_slli_epi32(w3, shift); \
+	res1=_mm_or_si128(w3, res1); \
+	w2=_mm_unpackhi_epi8(w1, _mm_setzero_si128()); \
+	w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+	w3=_mm_slli_epi32(w3, shift); \
+	res2=_mm_or_si128(w3, res2); \
+	w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+	w3=_mm_slli_epi32(w3, shift); \
+	res3=_mm_or_si128(w3, res3); \
 }while(0)
 
 //sse lut
@@ -317,10 +309,6 @@ static const uint8_t writer_len[256] = {
 };
 
 #define SSE_ENC_RGB_16 do{ \
-		/*convert to rgb vectors*/ \
-		PLANAR_SHUFFLE(r, da, db, dc, rshuf); \
-		PLANAR_SHUFFLE(g, db, dc, da, gshuf); \
-		PLANAR_SHUFFLE(b, dc, da, db, bshuf); \
 		/*convert vr, vb to vg_r, vg_b respectively*/ \
 		r=_mm_sub_epi8(r, g); \
 		b=_mm_sub_epi8(b, g); \
@@ -353,16 +341,16 @@ static const uint8_t writer_len[256] = {
 		opuse=_mm_or_si128(opuse, _mm_and_si128(op3, _mm_set1_epi8(3))); \
 		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, _mm_set1_epi8(247))); \
 		/*apply opcodes to output*/ \
-		working=_mm_unpacklo_epi8(opuse, _mm_setzero_si128()); \
-		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128()); \
-		res0=_mm_or_si128(working2, res0); \
-		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128()); \
-		res1=_mm_or_si128(working2, res1); \
-		working=_mm_unpackhi_epi8(opuse, _mm_setzero_si128()); \
-		working2=_mm_unpacklo_epi16(working, _mm_setzero_si128()); \
-		res2=_mm_or_si128(working2, res2); \
-		working2=_mm_unpackhi_epi16(working, _mm_setzero_si128()); \
-		res3=_mm_or_si128(working2, res3); \
+		w1=_mm_unpacklo_epi8(opuse, _mm_setzero_si128()); \
+		w2=_mm_unpacklo_epi16(w1, _mm_setzero_si128()); \
+		res0=_mm_or_si128(w2, res0); \
+		w2=_mm_unpackhi_epi16(w1, _mm_setzero_si128()); \
+		res1=_mm_or_si128(w2, res1); \
+		w1=_mm_unpackhi_epi8(opuse, _mm_setzero_si128()); \
+		w2=_mm_unpacklo_epi16(w1, _mm_setzero_si128()); \
+		res2=_mm_or_si128(w2, res2); \
+		w2=_mm_unpackhi_epi16(w1, _mm_setzero_si128()); \
+		res3=_mm_or_si128(w2, res3); \
 		/*bbrrggg0*/ \
 		NORMALISE_SHIFT16_EMBIGGEN(g, op1, _mm_set1_epi8(4), 1); \
 		NORMALISE_SHIFT16_EMBIGGEN(r, op1, _mm_set1_epi8(2), 4); \
@@ -377,79 +365,79 @@ static const uint8_t writer_len[256] = {
 		NORMALISE_SHIFT32_EMBIGGEN(b, op3, _mm_set1_epi8(64), 17); \
 		/*bbbbbbbb rrrrrrrr gggggggg 11110111*/ \
 		/*shift op4 g*/ \
-		working=_mm_and_si128(g, op4); \
-		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);/*switched to end up at 2nd byte posiiton*/ \
-		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-		res0=_mm_or_si128(working3, res0); \
-		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-		res1=_mm_or_si128(working3, res1); \
-		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);/*switched*/ \
-		working3=_mm_unpacklo_epi16(working2, _mm_setzero_si128()); \
-		res2=_mm_or_si128(working3, res2); \
-		working3=_mm_unpackhi_epi16(working2, _mm_setzero_si128()); \
-		res3=_mm_or_si128(working3, res3); \
+		w1=_mm_and_si128(g, op4); \
+		w2=_mm_unpacklo_epi8(_mm_setzero_si128(), w1);/*switched to end up at 2nd byte posiiton*/ \
+		w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+		res0=_mm_or_si128(w3, res0); \
+		w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+		res1=_mm_or_si128(w3, res1); \
+		w2=_mm_unpackhi_epi8(_mm_setzero_si128(), w1);/*switched*/ \
+		w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
+		res2=_mm_or_si128(w3, res2); \
+		w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
+		res3=_mm_or_si128(w3, res3); \
 		/*shift op4 r*/ \
-		working=_mm_and_si128(r, op4); \
-		working2=_mm_unpacklo_epi8(working, _mm_setzero_si128()); \
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res0=_mm_or_si128(working3, res0); \
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res1=_mm_or_si128(working3, res1); \
-		working2=_mm_unpackhi_epi8(working, _mm_setzero_si128()); \
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res2=_mm_or_si128(working3, res2); \
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res3=_mm_or_si128(working3, res3); \
+		w1=_mm_and_si128(r, op4); \
+		w2=_mm_unpacklo_epi8(w1, _mm_setzero_si128()); \
+		w3=_mm_unpacklo_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res0=_mm_or_si128(w3, res0); \
+		w3=_mm_unpackhi_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res1=_mm_or_si128(w3, res1); \
+		w2=_mm_unpackhi_epi8(w1, _mm_setzero_si128()); \
+		w3=_mm_unpacklo_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res2=_mm_or_si128(w3, res2); \
+		w3=_mm_unpackhi_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res3=_mm_or_si128(w3, res3); \
 		/*shift op4 b*/ \
-		working=_mm_and_si128(b, op4); \
-		working2=_mm_unpacklo_epi8(_mm_setzero_si128(), working);/*switch*/ \
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res0=_mm_or_si128(working3, res0); \
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res1=_mm_or_si128(working3, res1); \
-		working2=_mm_unpackhi_epi8(_mm_setzero_si128(), working);/*switch*/ \
-		working3=_mm_unpacklo_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res2=_mm_or_si128(working3, res2); \
-		working3=_mm_unpackhi_epi16(_mm_setzero_si128(), working2);/*switch*/ \
-		res3=_mm_or_si128(working3, res3); \
+		w1=_mm_and_si128(b, op4); \
+		w2=_mm_unpacklo_epi8(_mm_setzero_si128(), w1);/*switch*/ \
+		w3=_mm_unpacklo_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res0=_mm_or_si128(w3, res0); \
+		w3=_mm_unpackhi_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res1=_mm_or_si128(w3, res1); \
+		w2=_mm_unpackhi_epi8(_mm_setzero_si128(), w1);/*switch*/ \
+		w3=_mm_unpacklo_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res2=_mm_or_si128(w3, res2); \
+		w3=_mm_unpackhi_epi16(_mm_setzero_si128(), w2);/*switch*/ \
+		res3=_mm_or_si128(w3, res3); \
 		/*get lut for first 8 pixels*/ \
-		working2=_mm_unpacklo_epi8(op2, _mm_setzero_si128()); \
-		working=_mm_unpacklo_epi8(_mm_setzero_si128(), op3); \
-		working2=_mm_or_si128(working2, working); \
-		working=_mm_unpacklo_epi8(op4, op4); \
-		working2=_mm_or_si128(working2, working); \
-		lut_index=_mm_movemask_epi8(working2); \
+		w2=_mm_unpacklo_epi8(op2, _mm_setzero_si128()); \
+		w1=_mm_unpacklo_epi8(_mm_setzero_si128(), op3); \
+		w2=_mm_or_si128(w2, w1); \
+		w1=_mm_unpacklo_epi8(op4, op4); \
+		w2=_mm_or_si128(w2, w1); \
+		lut_index=_mm_movemask_epi8(w2); \
 		/*write first vec*/ \
-		working=_mm_loadu_si128((__m128i const*)(writer_lut)+((lut_index)&255)); \
-		working=_mm_shuffle_epi8(res0, working); \
-		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		w1=_mm_loadu_si128((__m128i const*)(writer_lut)+((lut_index)&255)); \
+		w1=_mm_shuffle_epi8(res0, w1); \
+		_mm_storeu_si128((__m128i*)(bytes+p), w1); \
 		p+=writer_len[(lut_index)&255]; \
 		/*write second vec*/ \
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
-		working=_mm_shuffle_epi8(res1, working); \
-		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		w1=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
+		w1=_mm_shuffle_epi8(res1, w1); \
+		_mm_storeu_si128((__m128i*)(bytes+p), w1); \
 		p+=writer_len[(lut_index>>8)&255]; \
 		/*get lut for next 8 pixels*/ \
-		working2=_mm_unpackhi_epi8(op2, _mm_setzero_si128()); \
-		working=_mm_unpackhi_epi8(_mm_setzero_si128(), op3); \
-		working2=_mm_or_si128(working2, working); \
-		working=_mm_unpackhi_epi8(op4, op4); \
-		working2=_mm_or_si128(working2, working); \
-		lut_index=_mm_movemask_epi8(working2); \
+		w2=_mm_unpackhi_epi8(op2, _mm_setzero_si128()); \
+		w1=_mm_unpackhi_epi8(_mm_setzero_si128(), op3); \
+		w2=_mm_or_si128(w2, w1); \
+		w1=_mm_unpackhi_epi8(op4, op4); \
+		w2=_mm_or_si128(w2, w1); \
+		lut_index=_mm_movemask_epi8(w2); \
 		/*write third vec*/ \
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index)&255)); \
-		working=_mm_shuffle_epi8(res2, working); \
-		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		w1=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index)&255)); \
+		w1=_mm_shuffle_epi8(res2, w1); \
+		_mm_storeu_si128((__m128i*)(bytes+p), w1); \
 		p+=writer_len[(lut_index)&255]; \
 		/*write fourth vec*/ \
-		working=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
-		working=_mm_shuffle_epi8(res3, working); \
-		_mm_storeu_si128((__m128i*)(bytes+p), working); \
+		w1=_mm_loadu_si128((__m128i const*)(writer_lut) + ((lut_index>>8)&255)); \
+		w1=_mm_shuffle_epi8(res3, w1); \
+		_mm_storeu_si128((__m128i*)(bytes+p), w1); \
 		p+=writer_len[(lut_index>>8)&255]; \
 }while(0)
 
 static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, working, working2, working3;
+	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int p=*pp, lut_index;
@@ -467,9 +455,14 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
 	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
 		//load and diff next 16 pixels
-		LOAD16_RGB(aa, da, cc, 0);
-		LOAD16_RGB(bb, db, aa, 16);
-		LOAD16_RGB(cc, dc, bb, 32);
+		LOAD16(aa, da, cc, 0, 3, 13);
+		LOAD16(bb, db, aa, 16, 3, 13);
+		LOAD16(cc, dc, bb, 32, 3, 13);
+
+		/*convert to rgb vectors*/
+		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
+		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
+		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
 
 		SSE_ENC_RGB_16;
 	}
@@ -480,8 +473,133 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 	*pp=p;
 }
 
+static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
+	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, prev;
+	__m128i gshuf, shuf1, shuf2, blend;
+	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
+	int p=*pp, lut_index, run=*rr;
+	unsigned char prevdump[16];
+	unsigned int px_pos;
+
+	//constants
+	shuf1=_mm_setr_epi8(0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15);
+	shuf2=_mm_setr_epi8(1,5,9,13,0,4,8,12,3,7,11,15,2,6,10,14);
+	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
+	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255);
+
+	//previous pixel
+	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
+	for (px_pos = 0; px_pos < pixel_cnt*4; px_pos += 64) {
+		//load pixels
+		prev=_mm_and_si128(id, id);
+		LOAD16(ia, da, id,  0, 4, 12);
+		LOAD16(ib, db, ia, 16, 4, 12);
+		LOAD16(ic, dc, ib, 32, 4, 12);
+		LOAD16(id, dd, ic, 48, 4, 12);
+
+		//do rle check
+		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(0xff))){
+			run+=16;
+			continue;
+		}
+
+		//unpack into rgba planes
+		w1=_mm_shuffle_epi8(da, shuf1);//r4g4b4a4
+		w2=_mm_shuffle_epi8(db, shuf1);//r4g4b4a4
+		w3=_mm_shuffle_epi8(dc, shuf2);//g4r4a4b4
+		w4=_mm_shuffle_epi8(dd, shuf2);//g4r4a4b4
+		w5=_mm_unpackhi_epi32(w1, w2);//b8a8
+		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
+		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
+		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
+			_mm_storeu_si128((__m128i*)prevdump, prev);//incorrect
+			pixel_prev->rgba.r=prevdump[12];
+			pixel_prev->rgba.g=prevdump[13];
+			pixel_prev->rgba.b=prevdump[14];
+			pixel_prev->rgba.a=prevdump[15];
+			qoi_encode_chunk4_scalar(pixels+px_pos, bytes, &p, 16, pixel_prev, &run);
+			continue;
+		}
+		DUMP_RUN(run);
+		//no alpha, finish extracting planes then re-use rgb sse implementation
+		b=_mm_blendv_epi8(w5, w6, blend);
+		w1=_mm_unpacklo_epi32(w1, w2);//r8g8
+		w2=_mm_unpacklo_epi32(w3, w4);//g8r8
+		r=_mm_blendv_epi8(w1, w2, blend);
+		g=_mm_blendv_epi8(w2, w1, blend);//out of order
+		g=_mm_shuffle_epi8(g, gshuf);//in order
+		SSE_ENC_RGB_16;
+	}
+	DUMP_RUN(run);
+	_mm_storeu_si128((__m128i*)prevdump, id);
+	pixel_prev->rgba.r=prevdump[12];
+	pixel_prev->rgba.g=prevdump[13];
+	pixel_prev->rgba.b=prevdump[14];
+	pixel_prev->rgba.a=prevdump[15];
+	*pp=p;
+	*rr=run;
+}
+
+static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
+	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, prev;
+	__m128i gshuf, shuf1, shuf2, blend;
+	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
+	int p=*pp, lut_index;
+	unsigned char prevdump[16];
+	unsigned int px_pos;
+
+	//constants
+	shuf1=_mm_setr_epi8(0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15);
+	shuf2=_mm_setr_epi8(1,5,9,13,0,4,8,12,3,7,11,15,2,6,10,14);
+	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
+	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255);
+
+	//previous pixel
+	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
+	for (px_pos = 0; px_pos < pixel_cnt*4; px_pos += 64) {
+		//load pixels
+		prev=_mm_and_si128(id, id);
+		LOAD16(ia, da, id,  0, 4, 12);
+		LOAD16(ib, db, ia, 16, 4, 12);
+		LOAD16(ic, dc, ib, 32, 4, 12);
+		LOAD16(id, dd, ic, 48, 4, 12);
+
+		//unpack into rgba planes
+		w1=_mm_shuffle_epi8(da, shuf1);//r4g4b4a4
+		w2=_mm_shuffle_epi8(db, shuf1);//r4g4b4a4
+		w3=_mm_shuffle_epi8(dc, shuf2);//g4r4a4b4
+		w4=_mm_shuffle_epi8(dd, shuf2);//g4r4a4b4
+		w5=_mm_unpackhi_epi32(w1, w2);//b8a8
+		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
+		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
+		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
+			_mm_storeu_si128((__m128i*)prevdump, prev);//incorrect
+			pixel_prev->rgba.r=prevdump[12];
+			pixel_prev->rgba.g=prevdump[13];
+			pixel_prev->rgba.b=prevdump[14];
+			pixel_prev->rgba.a=prevdump[15];
+			qoi_encode_chunk4_scalar_norle(pixels+px_pos, bytes, &p, 16, pixel_prev, NULL);
+			continue;
+		}
+		//no alpha, finish extracting planes then re-use rgb sse implementation
+		b=_mm_blendv_epi8(w5, w6, blend);
+		w1=_mm_unpacklo_epi32(w1, w2);//r8g8
+		w2=_mm_unpacklo_epi32(w3, w4);//g8r8
+		r=_mm_blendv_epi8(w1, w2, blend);
+		g=_mm_blendv_epi8(w2, w1, blend);//out of order
+		g=_mm_shuffle_epi8(g, gshuf);//in order
+		SSE_ENC_RGB_16;
+	}
+	_mm_storeu_si128((__m128i*)prevdump, id);
+	pixel_prev->rgba.r=prevdump[12];
+	pixel_prev->rgba.g=prevdump[13];
+	pixel_prev->rgba.b=prevdump[14];
+	pixel_prev->rgba.a=prevdump[15];
+	*pp=p;
+}
+
 static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, working, working2, working3;
+	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int p=*pp, lut_index, run=*rr;
@@ -499,16 +617,22 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
 	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
 		//load and diff next 16 pixels
-		LOAD16_RGB(aa, da, cc, 0);
-		LOAD16_RGB(bb, db, aa, 16);
-		LOAD16_RGB(cc, dc, bb, 32);
+		LOAD16(aa, da, cc, 0, 3, 13);
+		LOAD16(bb, db, aa, 16, 3, 13);
+		LOAD16(cc, dc, bb, 32, 3, 13);
 
-		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff)))
+		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){
 			run+=16;
-		else{
-			DUMP_RUN(run);
-			SSE_ENC_RGB_16;
+			continue;
 		}
+
+		DUMP_RUN(run);
+		/*convert to rgb vectors*/
+		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
+		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
+		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
+
+		SSE_ENC_RGB_16;
 	}
 	DUMP_RUN(run);
 	_mm_storeu_si128((__m128i*)prevdump, cc);
@@ -519,22 +643,20 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	*rr=run;
 }
 #else
-	//not compiled with QOI_SSE, replace implemented sse functions with scalar placeholders
+//not compiled with QOI_SSE, replace sse functions with scalar placeholders
 static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk3_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
 static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
-#endif
-
-//implement missing sse functions TODO
-static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
-}
 static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk4_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
+static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
+	qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
+}
+#endif
 
 //Optimised decode functions////////////////////////////////////////////////////
 
