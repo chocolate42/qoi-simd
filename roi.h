@@ -189,7 +189,7 @@ The function either returns NULL on failure (invalid data, or malloc or fopen
 failed) or a pointer to the decoded pixels. On success, the qoi_desc struct
 will be filled with the description from the file header.
 
-The returned pixel data should be free()d after use. */
+The returned pixel data should be QOI_FREE()d after use. */
 
 void *qoi_read(const char *filename, qoi_desc *desc, int channels);
 
@@ -208,7 +208,7 @@ The function either returns NULL on failure (invalid parameters or malloc
 failed) or a pointer to the encoded data on success. On success the out_len
 is set to the size in bytes of the encoded data.
 
-The returned qoi data should be free()d after use. */
+The returned qoi data should be QOI_FREE()d after use. */
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt);
 
@@ -218,7 +218,7 @@ The function either returns NULL on failure (invalid parameters or malloc
 failed) or a pointer to the decoded pixels. On success, the qoi_desc struct
 is filled with the description from the file header.
 
-The returned pixel data should be free()d after use. */
+The returned pixel data should be QOI_FREE()d after use. */
 
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels);
 
@@ -423,186 +423,311 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
 
-int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
-	char ppm_head[128];
+//decode to a format that contains raw pixels in RGB/A
+static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, int head_len, qoi_desc *desc, int channels, const options *opt){
 	dec_state s={0};
-	FILE *fi = fopen(qoi_f, "rb"), *fo;
-	qoi_desc desc={0};
-	unsigned char head[14];
+	FILE *fo;
 	unsigned int advancing;
-	if(!(fi=fopen(qoi_f, "rb")))
-		goto BADEXIT0;
-	if(!(fo=fopen(ppm_f, "wb")))
-		goto BADEXIT1;
-	if(14!=fread(head, 1, 14, fi))
-		goto BADEXIT2;
-
-	desc.width = head[4] << 24 | head[5] << 16 | head[6] << 8 | head[7];
-	desc.height = head[8] << 24 | head[9] << 16 | head[10] << 8 | head[11];
-	desc.channels = head[12];
-	desc.colorspace = head[13];
 
 	if(
-		desc.width==0 || desc.height==0 ||
-		desc.channels<3 || desc.channels>4 ||
-		desc.colorspace>3 ||
-		QOI_MAGIC!=(head[0] << 24 | head[1] << 16 | head[2] << 8 | head[3]) ||
-		desc.height >= QOI_PIXELS_MAX / desc.width
+		desc->width==0 || desc->height==0 ||
+		desc->channels<3 || desc->channels>4 ||
+		desc->colorspace>3
 	)
-		goto BADEXIT2;
+		goto BADEXIT0;
 
-	sprintf(ppm_head, "P6 %u %u 255\n", desc.width, desc.height);
-	if(strlen(ppm_head)!=fwrite(ppm_head, 1, strlen(ppm_head), fo))
-		goto BADEXIT2;
+	if(!(fo=fopen(out_f, "wb")))
+		goto BADEXIT0;
 
-	s.b_limit=CHUNK*2;
+	if(head_len){
+		if(head_len!=fwrite(head, 1, head_len, fo))
+			goto BADEXIT1;
+	}
+
+	s.b_limit=CHUNK*(desc->channels==3?2:3);
 	if(!(s.bytes=QOI_MALLOC(s.b_limit)))
-		goto BADEXIT2;
-	s.p_limit=CHUNK*3;
+		goto BADEXIT1;
+	s.p_limit=CHUNK*channels;
 	if(!(s.pixels=QOI_MALLOC(s.p_limit)))
-		goto BADEXIT3;
+		goto BADEXIT2;
 	s.px.rgba.a=255;
-	s.pixel_cnt=desc.width*desc.height;
+	s.pixel_cnt=desc->width*desc->height;
 	while(s.pixel_curr!=s.pixel_cnt){
 		advancing=s.pixel_curr;
 		s.b_present+=fread(s.bytes+s.b_present, 1, s.b_limit-s.b_present, fi);
-		decode_arr[(((desc.colorspace>>1)&1)?4:0)+((desc.channels==3)?2:0)+1/*channels==3*/](&s);
+		decode_arr[(((desc->colorspace>>1)&1)?4:0)+((desc->channels==3)?2:0)+((channels==3)?1:0)](&s);
 		if(s.px_pos!=fwrite(s.pixels, 1, s.px_pos, fo))
-			goto BADEXIT4;
+			goto BADEXIT3;
 		memmove(s.bytes, s.bytes+s.b, s.b_present-s.b);
 		s.b_present-=s.b;
 		s.b=0;
 		s.px_pos=0;
 		if(advancing==s.pixel_curr)//truncated input
-			goto BADEXIT4;
+			goto BADEXIT3;
 	}
 	QOI_FREE(s.pixels);
 	QOI_FREE(s.bytes);
-	fflush(fo);
 	fclose(fo);
+	return 0;
+	BADEXIT3:
+	QOI_FREE(s.pixels);
+	BADEXIT2:
+	QOI_FREE(s.bytes);
+	BADEXIT1:
+	fclose(fo);
+	BADEXIT0:
+	return 1;
+}
+
+static int file_to_desc(FILE *fi, qoi_desc *desc){
+	unsigned char head[14];
+	if(14!=fread(head, 1, 14, fi))
+		return 1;
+	if(QOI_MAGIC!=(head[0] << 24 | head[1] << 16 | head[2] << 8 | head[3]))
+		return 1;
+	desc->width = head[4] << 24 | head[5] << 16 | head[6] << 8 | head[7];
+	desc->height = head[8] << 24 | head[9] << 16 | head[10] << 8 | head[11];
+	desc->channels = head[12];
+	desc->colorspace = head[13];
+	return 0;
+}
+
+int qoi_read_to_pam(const char *qoi_f, const char *pam_f, const options *opt) {
+	char head[128];
+	FILE *fi;
+	qoi_desc desc;
+	if(!(fi=fopen(qoi_f, "rb")))
+		goto BADEXIT0;
+	if(file_to_desc(fi, &desc))
+		goto BADEXIT1;
+
+	sprintf(head, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH %u\nMAXVAL 255\nTUPLTYPE RGB%s\nENDHDR\n", desc.width, desc.height, desc.channels, desc.channels==3?"":"_ALPHA");
+
+	if(qoi_read_to_file(fi, pam_f, head, strlen(head), &desc, desc.channels, opt))
+		goto BADEXIT1;
+
 	fclose(fi);
 	return 0;
-	BADEXIT4:
-	QOI_FREE(s.pixels);
-	BADEXIT3:
-	QOI_FREE(s.bytes);
-	BADEXIT2:
-	fclose(fo);
 	BADEXIT1:
 	fclose(fi);
 	BADEXIT0:
 	return 1;
 }
 
-//avoid including ctype.h with these defines
+int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
+	char head[128];
+	FILE *fi;
+	qoi_desc desc;
+	if(!(fi=fopen(qoi_f, "rb")))
+		goto BADEXIT0;
+	if(file_to_desc(fi, &desc))
+		goto BADEXIT1;
+
+	sprintf(head, "P6 %u %u 255\n", desc.width, desc.height);
+
+	if(qoi_read_to_file(fi, ppm_f, head, strlen(head), &desc, 3, opt))
+		goto BADEXIT1;
+
+	fclose(fi);
+	return 0;
+	BADEXIT1:
+	fclose(fi);
+	BADEXIT0:
+	return 1;
+}
+
+//process from an opened raw file directly
+static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *desc, const options *opt){
+	FILE *fo;
+	int p=0, run=0;
+	qoi_rgba_t px_prev;
+	unsigned char *in, *out;
+	unsigned int i, pixels;
+
+	if(!(fo = fopen(qoi_f, "wb")))
+		goto BADEXIT0;
+
+	if(!(in=QOI_MALLOC(CHUNK*desc->channels)))
+		goto BADEXIT1;
+	if(!(out=QOI_MALLOC(CHUNK*(desc->channels==3?4:6))))
+		goto BADEXIT2;
+
+	qoi_encode_init(desc, out, &p, &px_prev, opt);
+	if(p!=fwrite(out, 1, p, fo))
+		goto BADEXIT3;
+
+	pixels=desc->width*desc->height;
+	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
+		if((CHUNK*desc->channels)!=fread(in, 1, CHUNK*desc->channels, fi))
+			goto BADEXIT3;
+		p=0;
+		enc_chunk_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->rle?1:0)](in, out, &p, CHUNK, &px_prev, &run);
+		if(p!=fwrite(out, 1, p, fo))
+			goto BADEXIT3;
+	}
+	if(i<pixels){
+		if(((pixels-i)*desc->channels)!=fread(in, 1, (pixels-i)*desc->channels, fi))
+			goto BADEXIT3;
+		p=0;
+		enc_finish_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->rle?1:0)](in, out, &p, (pixels-i), &px_prev, &run);
+		if(p!=fwrite(out, 1, p, fo))
+			goto BADEXIT3;
+	}
+	if(run){
+		out[0] = QOI_OP_RUN | ((run - 1)<<3);
+		if(1!=fwrite(out, 1, 1, fo))
+			goto BADEXIT3;
+	}
+	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
+		goto BADEXIT3;
+
+	QOI_FREE(out);
+	QOI_FREE(in);
+	fclose(fo);
+	return 0;
+	BADEXIT3:
+	QOI_FREE(out);
+	BADEXIT2:
+	QOI_FREE(in);
+	BADEXIT1:
+	fclose(fo);
+	BADEXIT0:
+	return 1;
+}
+
+//defines to make processing pam/ppm headers simple
+
 #define isspace(num) (num==' '||((num>=0x09) && (num<=0x0d)))
 #define isdigit(num) ((num>='0') && (num<='9'))
 
+#define PAM_READ1 do{ \
+	if(1!=fread(&t, 1, 1, fi)) \
+		goto BADEXIT1; \
+}while(0)
+
 //Read a variable from a ppm header
-#define PPM_SPACE_NUM(var) do{ \
+#define PAM_SPACE_NUM(var) do{ \
 	if(!isspace(t)) \
 		goto BADEXIT1; \
 	do { \
-		if(1!=fread(&t, 1, 1, fi)) \
-			goto BADEXIT1; \
+		PAM_READ1; \
 	} while(isspace(t)); \
 	if(!isdigit(t)) \
 		goto BADEXIT1; \
 	while(isdigit(t)){ \
 		var*=10; \
 		var+=(t-'0'); \
-		if(1!=fread(&t, 1, 1, fi)) \
-			goto BADEXIT1; \
+		PAM_READ1; \
 	} \
 }while(0);
 
-int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt) {
-	int p=0, run=0;
+#define PAM_EXPECT(val) do{ \
+	PAM_READ1; \
+	if(t!=val) \
+		goto BADEXIT1; \
+}while(0)
+
+#define PAM_COMMENT do{ \
+	while(t!='\n'){ \
+		PAM_READ1; \
+	} \
+}while(0)
+
+int qoi_write_from_pam(const char *pam_f, const char *qoi_f, const options *opt) {
 	qoi_desc desc;
-	unsigned char t, *in, *out;
-	unsigned int height=0, i, maxval=0, pixels, width=0;
-	qoi_rgba_t px_prev;
-	FILE *fi, *fo;
+	char *token[]={"WIDTH", "HEIGHT", "DEPTH", "MAXVAL", "ENDHDR\n"};
+	unsigned int hval[4]={0};
+	unsigned char t;
+	unsigned int i, j;
+	FILE *fi;
+
+	if(!(fi = fopen(pam_f, "rb")))
+		goto BADEXIT0;
+
+	PAM_EXPECT('P');
+	PAM_EXPECT('7');
+	PAM_EXPECT('\n');
+
+	while(1){//read header line by line
+		PAM_READ1;
+		if(t=='\n')//empty line
+			continue;
+		if(t=='#'){//comment
+			PAM_COMMENT;
+			continue;
+		}
+		for(i=0;i<5;++i){
+			if(t==token[i][0])
+				break;
+		}
+		if(i==5){//irrelevant token
+			PAM_COMMENT;
+			continue;
+		}
+		for(j=1;token[i][j];++j){
+			PAM_READ1;
+			if(t!=token[i][j])
+				break;
+		}
+		if(token[i][j]){
+			PAM_COMMENT;
+			continue;
+		}
+		if(i==4)//ENDHDR
+			break;
+		//WIDTH HEIGHT DEPTH MAXVAL
+		if(hval[i])//there can be only one
+			goto BADEXIT1;
+		PAM_READ1;
+		PAM_SPACE_NUM(hval[i]);
+	}
+	if(hval[0]==0 || hval[1]==0 || hval[2]<3 || hval[2]>4 || hval[3]>255 )
+		goto BADEXIT1;
+	desc.width=hval[0];
+	desc.height=hval[1];
+	desc.channels=hval[2];
+	desc.colorspace=0;
+
+	if(qoi_write_from_file(fi, qoi_f, &desc, opt))
+		goto BADEXIT1;
+
+	fclose(fi);
+	return 0;
+	BADEXIT1:
+	fclose(fi);
+	BADEXIT0:
+	return 1;
+}
+
+int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt) {
+	qoi_desc desc={0};
+	unsigned char t;
+	unsigned int maxval=0;
+	FILE *fi;
 
 	if(!(fi = fopen(ppm_f, "rb")))
 		goto BADEXIT0;
-	if(!(fo=fopen(qoi_f, "wb")))
-		goto BADEXIT1;
 
-	//magic
-	if(1!=fread(&t, 1, 1, fi))
-		goto BADEXIT2;
-	if(t!='P')
-		goto BADEXIT2;
-	if(1!=fread(&t, 1, 1, fi))
-		goto BADEXIT2;
-	if(t!='6')
-		goto BADEXIT2;
-
-	//rest of header
-	if(1!=fread(&t, 1, 1, fi))
-		goto BADEXIT2;
-	PPM_SPACE_NUM(width);
-	PPM_SPACE_NUM(height);
-	PPM_SPACE_NUM(maxval);
-	if(t=='#'){//comment
-		while((t!='\n') && (t!='\r')){
-			if(1!=fread(&t, 1, 1, fi))
-				goto BADEXIT2;
-		}
+	PAM_EXPECT('P');
+	PAM_EXPECT('6');
+	PAM_READ1;
+	PAM_SPACE_NUM(desc.width);
+	PAM_SPACE_NUM(desc.height);
+	PAM_SPACE_NUM(maxval);
+	if(t=='#'){
+		PAM_COMMENT;
 	}
 	if(!isspace(t))
-		goto BADEXIT2;
-	if(maxval>255)//multi-byte not supported
-		goto BADEXIT2;
-
-	if(!(in=QOI_MALLOC(CHUNK*3)))
-		goto BADEXIT2;
-	if(!(out=QOI_MALLOC(CHUNK*4)))
-		goto BADEXIT3;
-	desc.width=width;
-	desc.height=height;
+		goto BADEXIT1;
+	if(maxval>255)
+		goto BADEXIT1;
 	desc.channels=3;
 	desc.colorspace=0;
-	qoi_encode_init(&desc, out, &p, &px_prev, opt);
-	if(p!=fwrite(out, 1, p, fo))
-		goto BADEXIT4;
-	pixels=width*height;
-	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
-		if((CHUNK*3)!=fread(in, 1, CHUNK*3, fi))
-			goto BADEXIT4;
-		p=0;
-		enc_chunk_arr[(opt->path<<1)|opt->rle](in, out, &p, CHUNK, &px_prev, &run);
-		if(p!=fwrite(out, 1, p, fo))
-			goto BADEXIT4;
-	}
-	if(i<pixels){
-		if(((pixels-i)*3)!=fread(in, 1, (pixels-i)*3, fi))
-			goto BADEXIT4;
-		p=0;
-		enc_finish_arr[(opt->path<<1)|opt->rle](in, out, &p, (pixels-i), &px_prev, &run);
-		if(p!=fwrite(out, 1, p, fo))
-			goto BADEXIT4;
-	}
-	if(run){
-		out[0] = QOI_OP_RUN | ((run - 1)<<3);
-		if(1!=fwrite(out, 1, 1, fo))
-			goto BADEXIT4;
-	}
-	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
-		goto BADEXIT4;
-	QOI_FREE(out);
-	QOI_FREE(in);
-	fflush(fo);
-	fclose(fo);
+	if(qoi_write_from_file(fi, qoi_f, &desc, opt))
+		goto BADEXIT1;
+
 	fclose(fi);
 	return 0;
-	BADEXIT4:
-	QOI_FREE(out);
-	BADEXIT3:
-	QOI_FREE(in);
-	BADEXIT2:
-	fclose(fo);
 	BADEXIT1:
 	fclose(fi);
 	BADEXIT0:

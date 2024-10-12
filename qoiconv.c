@@ -72,6 +72,10 @@ int main(int argc, char **argv) {
 		return qoi_write_from_ppm(argv[argc-2], argv[argc-1], &opt);
 	else if ((STR_ENDS_WITH(argv[argc-2], ".roi")) && (STR_ENDS_WITH(argv[argc-1], ".ppm")))
 		return qoi_read_to_ppm(argv[argc-2], argv[argc-1], &opt);
+	if ((STR_ENDS_WITH(argv[argc-2], ".pam")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
+		return qoi_write_from_pam(argv[argc-2], argv[argc-1], &opt);
+	else if ((STR_ENDS_WITH(argv[argc-2], ".roi")) && (STR_ENDS_WITH(argv[argc-1], ".pam")))
+		return qoi_read_to_pam(argv[argc-2], argv[argc-1], &opt);
 	else {
 #endif
 
