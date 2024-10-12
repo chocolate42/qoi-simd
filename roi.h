@@ -159,7 +159,7 @@ typedef struct {
 
 enum codepath {best, scalar, sse};
 typedef struct{
-	unsigned char rle;
+	unsigned char norle;
 	enum codepath path;
 } options;
 
@@ -308,7 +308,7 @@ static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, 
 	qoi_write_32(bytes, p, desc->height);
 	bytes[(*p)++] = desc->channels;
 #ifdef ROI
-	bytes[(*p)++] = (opt->rle==0?2:0)+desc->colorspace;
+	bytes[(*p)++] = (opt->norle?2:0)+desc->colorspace;
 #else
 	bytes[(*p)++] = desc->colorspace;
 #endif
@@ -327,7 +327,7 @@ typedef struct{
 #include "roi_optimised.c"
 
 //pointers to optimised encode functions
-//indexed with ((channels-3)*6) | (codepath<<1) | rle
+//indexed with ((channels-3)*6) + (codepath<<1) + rle?1:0
 static void (*enc_chunk_arr[])(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*)={
 	qoi_encode_chunk3_sse_norle, qoi_encode_chunk3_sse, qoi_encode_chunk3_scalar_norle, qoi_encode_chunk3_scalar, qoi_encode_chunk3_sse_norle, qoi_encode_chunk3_sse,
 	qoi_encode_chunk4_sse_norle, qoi_encode_chunk4_sse, qoi_encode_chunk4_scalar_norle, qoi_encode_chunk4_scalar, qoi_encode_chunk4_sse_norle, qoi_encode_chunk4_sse,
@@ -350,7 +350,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
 		desc->height >= QOI_PIXELS_MAX / desc->width ||
-		opt->rle>1 || opt->path>2
+		opt->norle>1 || opt->path>2
 	)
 		return NULL;
 
@@ -363,9 +363,9 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 
 	qoi_encode_init(desc, bytes, &p, &px_prev, opt);
 	if((desc->width * desc->height)/CHUNK)//encode most of the input as the largest multiple of chunk size for simd
-		enc_chunk_arr[((desc->channels-3)*6)+((opt->path<<1)|opt->rle)]((const unsigned char *)data, bytes, &p, (desc->width * desc->height)-((desc->width * desc->height)%CHUNK), &px_prev, &run);
+		enc_chunk_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->norle?0:1)]((const unsigned char *)data, bytes, &p, (desc->width * desc->height)-((desc->width * desc->height)%CHUNK), &px_prev, &run);
 	if((desc->width * desc->height)%CHUNK)//encode the trailing input scalar
-		enc_finish_arr[((desc->channels-3)*6)+((opt->path<<1)|opt->rle)]((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
+		enc_finish_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->norle?0:1)]((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
 			bytes, &p, ((desc->width * desc->height)%CHUNK), &px_prev, &run);
 
 	if (run)
@@ -561,7 +561,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		if((CHUNK*desc->channels)!=fread(in, 1, CHUNK*desc->channels, fi))
 			goto BADEXIT3;
 		p=0;
-		enc_chunk_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->rle?1:0)](in, out, &p, CHUNK, &px_prev, &run);
+		enc_chunk_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->norle?0:1)](in, out, &p, CHUNK, &px_prev, &run);
 		if(p!=fwrite(out, 1, p, fo))
 			goto BADEXIT3;
 	}
@@ -569,7 +569,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		if(((pixels-i)*desc->channels)!=fread(in, 1, (pixels-i)*desc->channels, fi))
 			goto BADEXIT3;
 		p=0;
-		enc_finish_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->rle?1:0)](in, out, &p, (pixels-i), &px_prev, &run);
+		enc_finish_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->norle?0:1)](in, out, &p, (pixels-i), &px_prev, &run);
 		if(p!=fwrite(out, 1, p, fo))
 			goto BADEXIT3;
 	}

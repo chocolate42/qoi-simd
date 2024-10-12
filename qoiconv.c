@@ -16,7 +16,6 @@ Compile with:
 
 */
 
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_NO_LINEAR
@@ -37,19 +36,16 @@ Compile with:
 #include "qoi.h"
 #endif
 
-
 #define STR_ENDS_WITH(S, E) (strcmp(S + strlen(S) - (sizeof(E)-1), E) == 0)
 
 int main(int argc, char **argv) {
-	int norle=0;
 	options opt={0};
 	if (argc < 3) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
-		puts(" -rle : Enable RLE (disabled by default)");
+		puts(" -norle : Disable RLE");
 		puts(" -scalar : Use scalar instructions");
-		puts(" -sse : Use SSE instructions (if possible)");
-		puts("Defaults to fastest implemented instruction set");
+		puts(" -sse : Use SSE instructions (default)");
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
@@ -57,8 +53,8 @@ int main(int argc, char **argv) {
 	}
 
 	for(int i=1;i<(argc-2);++i){
-		if(strcmp(argv[i], "-rle")==0)
-			opt.rle=1;
+		if(strcmp(argv[i], "-norle")==0)
+			opt.norle=1;
 		else if(strcmp(argv[i], "-scalar")==0)
 			opt.path=scalar;
 		else if(strcmp(argv[i], "-sse")==0)
@@ -114,18 +110,8 @@ int main(int argc, char **argv) {
 			.width = w,
 			.height = h, 
 			.channels = channels,
-			.colorspace = (norle<<1)|QOI_SRGB
+			.colorspace = QOI_SRGB
 		}, &opt);
-	}
-	else if (STR_ENDS_WITH(argv[argc-1], ".ppm")) {
-		char header[512];
-		FILE *fo = fopen(argv[argc-1], "wb");
-		int headerlen;
-		headerlen=sprintf(header, "P6 %u %u 255\n", w, h);
-		fwrite(header, 1, headerlen, fo);
-		fwrite(pixels, 1, w*h*3, fo);
-		fclose(fo);
-		encoded=1;
 	}
 
 	if (!encoded) {
