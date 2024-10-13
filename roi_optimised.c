@@ -73,9 +73,9 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp;
 	int run=*r;
-	qoi_rgba_t px, px_prev=*pixel_prev;
+	qoi_rgba_t px={0}, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
-	px.rgba.a=255;
+
 	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
 		ENC_READ_RGB;
 		while(px.v == px_prev.v) {
@@ -100,9 +100,9 @@ static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char 
 
 static void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp;
-	qoi_rgba_t px, px_prev=*pixel_prev;
+	qoi_rgba_t px={0}, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
-	px.rgba.a=255;
+
 	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
 		ENC_READ_RGB;
 		RGB_ENC_SCALAR;
@@ -118,7 +118,6 @@ static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char 
 	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
 	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
 		ENC_READ_RGBA;
-
 		while(px.v == px_prev.v) {
 			++run;
 			if(px_pos == px_end) {
@@ -362,7 +361,7 @@ static const uint8_t writer_len[256] = {
 		/*bbbbbbbb rrrrrrrr gggggggg 11110111*/ \
 		/*shift op4 g*/ \
 		w1=_mm_and_si128(g, op4); \
-		w2=_mm_unpacklo_epi8(_mm_setzero_si128(), w1);/*switched to end up at 2nd byte posiiton*/ \
+		w2=_mm_unpacklo_epi8(_mm_setzero_si128(), w1);/*switched to end up at 2nd byte position*/ \
 		w3=_mm_unpacklo_epi16(w2, _mm_setzero_si128()); \
 		res0=_mm_or_si128(w3, res0); \
 		w3=_mm_unpackhi_epi16(w2, _mm_setzero_si128()); \
@@ -470,7 +469,7 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 }
 
 static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, prev;
+	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, previous;
 	__m128i gshuf, shuf1, shuf2, blend;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int p=*pp, lut_index, run=*rr;
@@ -487,14 +486,13 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
 	for (px_pos = 0; px_pos < pixel_cnt*4; px_pos += 64) {
 		//load pixels
-		prev=_mm_and_si128(id, id);
+		previous=_mm_and_si128(id, id);
 		LOAD16(ia, da, id,  0, 4, 12);
 		LOAD16(ib, db, ia, 16, 4, 12);
 		LOAD16(ic, dc, ib, 32, 4, 12);
 		LOAD16(id, dd, ic, 48, 4, 12);
 
-		//do rle check
-		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(0xff))){
+		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(0xff))){//all RLE
 			run+=16;
 			continue;
 		}
@@ -508,7 +506,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
 		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
 		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
-			_mm_storeu_si128((__m128i*)prevdump, prev);//incorrect
+			_mm_storeu_si128((__m128i*)prevdump, previous);
 			pixel_prev->rgba.r=prevdump[12];
 			pixel_prev->rgba.g=prevdump[13];
 			pixel_prev->rgba.b=prevdump[14];
@@ -524,9 +522,20 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 		r=_mm_blendv_epi8(w1, w2, blend);
 		g=_mm_blendv_epi8(w2, w1, blend);//out of order
 		g=_mm_shuffle_epi8(g, gshuf);//in order
+
+		w1=_mm_cmpeq_epi8(_mm_or_si128(r, _mm_or_si128(g, b)), _mm_set1_epi8(0));
+		if(!_mm_testz_si128(w1, w1)){//potential RLE, do iteration scalar
+			_mm_storeu_si128((__m128i*)prevdump, previous);
+			pixel_prev->rgba.r=prevdump[12];
+			pixel_prev->rgba.g=prevdump[13];
+			pixel_prev->rgba.b=prevdump[14];
+			pixel_prev->rgba.a=prevdump[15];
+			qoi_encode_chunk4_scalar(pixels+px_pos, bytes, &p, 16, pixel_prev, &run);
+			continue;
+		}
+
 		SSE_ENC_RGB_16;
 	}
-	DUMP_RUN(run);
 	_mm_storeu_si128((__m128i*)prevdump, id);
 	pixel_prev->rgba.r=prevdump[12];
 	pixel_prev->rgba.g=prevdump[13];
@@ -537,7 +546,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 }
 
 static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, prev;
+	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, previous;
 	__m128i gshuf, shuf1, shuf2, blend;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int p=*pp, lut_index;
@@ -554,7 +563,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
 	for (px_pos = 0; px_pos < pixel_cnt*4; px_pos += 64) {
 		//load pixels
-		prev=_mm_and_si128(id, id);
+		previous=_mm_and_si128(id, id);
 		LOAD16(ia, da, id,  0, 4, 12);
 		LOAD16(ib, db, ia, 16, 4, 12);
 		LOAD16(ic, dc, ib, 32, 4, 12);
@@ -569,7 +578,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
 		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
 		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
-			_mm_storeu_si128((__m128i*)prevdump, prev);
+			_mm_storeu_si128((__m128i*)prevdump, previous);
 			pixel_prev->rgba.r=prevdump[12];
 			pixel_prev->rgba.g=prevdump[13];
 			pixel_prev->rgba.b=prevdump[14];
@@ -595,7 +604,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 }
 
 static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
+	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3, previous;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int p=*pp, lut_index, run=*rr;
@@ -613,24 +622,34 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
 	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
 		//load and diff next 16 pixels
+		previous=_mm_and_si128(cc, cc);
 		LOAD16(aa, da, cc, 0, 3, 13);
 		LOAD16(bb, db, aa, 16, 3, 13);
 		LOAD16(cc, dc, bb, 32, 3, 13);
 
-		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){
+		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){//all RLE
 			run+=16;
 			continue;
 		}
 
-		DUMP_RUN(run);
 		/*convert to rgb vectors*/
 		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
 		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
 		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
 
+		w1=_mm_cmpeq_epi8(_mm_or_si128(r, _mm_or_si128(g, b)), _mm_set1_epi8(0));
+		if(!_mm_testz_si128(w1, w1)){//potential RLE, do iteration scalar
+			_mm_storeu_si128((__m128i*)prevdump, previous);
+			pixel_prev->rgba.r=prevdump[13];
+			pixel_prev->rgba.g=prevdump[14];
+			pixel_prev->rgba.b=prevdump[15];
+			qoi_encode_chunk3_scalar(pixels+px_pos, bytes, &p, 16, pixel_prev, &run);
+			continue;
+		}
+
+		DUMP_RUN(run);
 		SSE_ENC_RGB_16;
 	}
-	DUMP_RUN(run);
 	_mm_storeu_si128((__m128i*)prevdump, cc);
 	pixel_prev->rgba.r=prevdump[13];
 	pixel_prev->rgba.g=prevdump[14];

@@ -315,7 +315,7 @@ static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, 
 	px_prev->rgba.r = 0;
 	px_prev->rgba.g = 0;
 	px_prev->rgba.b = 0;
-	px_prev->rgba.a = 255;
+	px_prev->rgba.a = desc->channels==3?0:255;//to simplify ENC_READ_RGB
 }
 
 typedef struct{
