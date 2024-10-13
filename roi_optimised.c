@@ -48,9 +48,11 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	if ( arb < 2 && ag  < 4 ) {\
 		bytes[p++]=QOI_OP_LUMA232|((vg_b+2)<<6)|((vg_r+2)<<4)|((vg+4)<<1);\
 	} else if ( arb <  8 && ag  < 32 ) {\
-		poke_u16le(bytes, &p, QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2));\
+		*(unsigned int*)(bytes+p)=QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2); \
+		p+=2; \
 	} else if ( (arb|ag) < 64 ) {\
-		poke_u24le(bytes, &p, QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3));\
+		*(unsigned int*)(bytes+p)=QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3); \
+		p+=3; \
 	} else {\
 		bytes[p++]=QOI_OP_RGB; \
 		bytes[p++]=vg; \
@@ -681,7 +683,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 //Optimised decode functions////////////////////////////////////////////////////
 
 #define QOI_DECODE_COMMON \
-	int b1 = s->bytes[s->b++]; \
+	;int b1 = s->bytes[s->b++]; \
 	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
 		int vg = ((b1>>1)&7) - 6; \
 		s->px.rgba.r += vg + ((b1 >> 4) & 3); \
