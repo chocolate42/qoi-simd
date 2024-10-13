@@ -547,7 +547,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	if(!(fo = fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
-	if(!(in=QOI_MALLOC(CHUNK*desc->channels)))
+	if(!(in=QOI_MALLOC((CHUNK*desc->channels)+1)))
 		goto BADEXIT1;
 	if(!(out=QOI_MALLOC(CHUNK*(desc->channels==3?4:6))))
 		goto BADEXIT2;

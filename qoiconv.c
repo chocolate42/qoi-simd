@@ -87,6 +87,7 @@ int main(int argc, char **argv) {
 			channels = 4;
 
 		pixels = (void *)stbi_load(argv[argc-2], &w, &h, NULL, channels);
+		pixels = realloc(pixels, (w*h*channels)+1);
 	}
 	else if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) {
 		qoi_desc desc;

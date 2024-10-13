@@ -59,19 +59,15 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	}\
 }while(0)
 
-//px.v=*(unsigned int*)(pixels+px_pos)&0x00FFFFFF;
+//	px.rgba.r = pixels[px_pos + 0];
+//	px.rgba.g = pixels[px_pos + 1];
+//	px.rgba.b = pixels[px_pos + 2];
 #define ENC_READ_RGB do{ \
-	px.rgba.r = pixels[px_pos + 0]; \
-	px.rgba.g = pixels[px_pos + 1]; \
-	px.rgba.b = pixels[px_pos + 2]; \
+	px.v=*(unsigned int*)(pixels+px_pos)&0x00FFFFFF; \
 }while(0)
 
-//px.v=*(unsigned int*)(pixels+px_pos);
 #define ENC_READ_RGBA do{ \
-	px.rgba.r = pixels[px_pos + 0]; \
-	px.rgba.g = pixels[px_pos + 1]; \
-	px.rgba.b = pixels[px_pos + 2]; \
-	px.rgba.a = pixels[px_pos + 3]; \
+	px.v=*(unsigned int*)(pixels+px_pos); \
 }while(0)
 
 static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
