@@ -59,6 +59,21 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	}\
 }while(0)
 
+//px.v=*(unsigned int*)(pixels+px_pos)&0x00FFFFFF;
+#define ENC_READ_RGB do{ \
+	px.rgba.r = pixels[px_pos + 0]; \
+	px.rgba.g = pixels[px_pos + 1]; \
+	px.rgba.b = pixels[px_pos + 2]; \
+}while(0)
+
+//px.v=*(unsigned int*)(pixels+px_pos);
+#define ENC_READ_RGBA do{ \
+	px.rgba.r = pixels[px_pos + 0]; \
+	px.rgba.g = pixels[px_pos + 1]; \
+	px.rgba.b = pixels[px_pos + 2]; \
+	px.rgba.a = pixels[px_pos + 3]; \
+}while(0)
+
 static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp;
 	int run=*r;
@@ -66,9 +81,7 @@ static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char 
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
 	px.rgba.a=255;
 	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
+		ENC_READ_RGB;
 		while(px.v == px_prev.v) {
 			++run;
 			if(px_pos == px_end){
@@ -77,9 +90,7 @@ static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char 
 				goto DONE;
 			}
 			px_pos+=3;
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
+			ENC_READ_RGB;
 		}
 		DUMP_RUN(run);
 		RGB_ENC_SCALAR;
@@ -97,9 +108,7 @@ static void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned
 	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
 	px.rgba.a=255;
 	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
+		ENC_READ_RGB;
 		RGB_ENC_SCALAR;
 		px_prev = px;
 	}
@@ -112,10 +121,7 @@ static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char 
 	qoi_rgba_t px, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
 	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		px.rgba.a = pixels[px_pos + 3];
+		ENC_READ_RGBA;
 
 		while(px.v == px_prev.v) {
 			++run;
@@ -125,10 +131,7 @@ static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char 
 				goto DONE;
 			}
 			px_pos+=4;
-			px.rgba.r = pixels[px_pos + 0];
-			px.rgba.g = pixels[px_pos + 1];
-			px.rgba.b = pixels[px_pos + 2];
-			px.rgba.a = pixels[px_pos + 3];
+			ENC_READ_RGBA;
 		}
 		DUMP_RUN(run);
 		if(px.rgba.a!=px_prev.rgba.a){
@@ -149,10 +152,7 @@ static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned
 	qoi_rgba_t px, px_prev=*pixel_prev;
 	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
 	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
-		px.rgba.r = pixels[px_pos + 0];
-		px.rgba.g = pixels[px_pos + 1];
-		px.rgba.b = pixels[px_pos + 2];
-		px.rgba.a = pixels[px_pos + 3];
+		ENC_READ_RGBA;
 		if(px.rgba.a!=px_prev.rgba.a){
 			bytes[p++] = QOI_OP_RGBA;
 			bytes[p++] = px.rgba.a;
@@ -573,7 +573,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
 		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
 		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
-			_mm_storeu_si128((__m128i*)prevdump, prev);//incorrect
+			_mm_storeu_si128((__m128i*)prevdump, prev);
 			pixel_prev->rgba.r=prevdump[12];
 			pixel_prev->rgba.g=prevdump[13];
 			pixel_prev->rgba.b=prevdump[14];
