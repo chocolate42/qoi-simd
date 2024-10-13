@@ -331,7 +331,7 @@ static const uint8_t writer_len[256] = {
 		op2=_mm_or_si128(op2, arb); \
 		op2=_mm_cmpgt_epi8(_mm_set1_epi8(8), op2);/*op1|op2*/ \
 		op3=_mm_cmpgt_epi8(_mm_set1_epi8(64), _mm_or_si128(arb, ag));/*op1|op2|op3*/ \
-		op4=_mm_andnot_si128(op3, _mm_set1_epi8(0xff));/*op4*/ \
+		op4=_mm_andnot_si128(op3, _mm_set1_epi8(-1));/*op4*/ \
 		op3=_mm_sub_epi8(op3, op2);/*op3*/ \
 		op2=_mm_sub_epi8(op2, op1);/*op2*/ \
 		res0=_mm_setzero_si128(); \
@@ -341,7 +341,7 @@ static const uint8_t writer_len[256] = {
 		/*build opcode vector*/ \
 		opuse=_mm_and_si128(op2, _mm_set1_epi8(1)); \
 		opuse=_mm_or_si128(opuse, _mm_and_si128(op3, _mm_set1_epi8(3))); \
-		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, _mm_set1_epi8(247))); \
+		opuse=_mm_or_si128(opuse, _mm_and_si128(op4, _mm_set1_epi8(-9))); \
 		/*apply opcodes to output*/ \
 		w1=_mm_unpacklo_epi8(opuse, _mm_setzero_si128()); \
 		w2=_mm_unpacklo_epi16(w1, _mm_setzero_si128()); \
@@ -450,8 +450,8 @@ static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned ch
 	rshuf=_mm_setr_epi8(0,3,6,9,12,15, 2,5,8,11,14, 1,4,7,10,13);
 	gshuf=_mm_setr_epi8(1,4,7,10,13, 0,3,6,9,12,15, 2,5,8,11,14);
 	bshuf=_mm_setr_epi8(2,5,8,11,14, 1,4,7,10,13, 0,3,6,9,12,15);
-	blend1=_mm_setr_epi8(0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,0);
-	blend2=_mm_setr_epi8(0,255,0,0,255,0,0,255,0,0,255,0,0,255,0,0);
+	blend1=_mm_setr_epi8(0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0);
+	blend2=_mm_setr_epi8(0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0);
 
 	//previous pixel
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
@@ -487,7 +487,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 	shuf1=_mm_setr_epi8(0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15);
 	shuf2=_mm_setr_epi8(1,5,9,13,0,4,8,12,3,7,11,15,2,6,10,14);
 	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
-	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255);
+	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1);
 
 	//previous pixel
 	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
@@ -499,7 +499,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 		LOAD16(ic, dc, ib, 32, 4, 12);
 		LOAD16(id, dd, ic, 48, 4, 12);
 
-		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(0xff))){//all RLE
+		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(-1))){//all RLE
 			run+=16;
 			continue;
 		}
@@ -512,7 +512,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 		w5=_mm_unpackhi_epi32(w1, w2);//b8a8
 		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
 		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
-		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
+		if(!_mm_test_all_zeros(a, _mm_set1_epi8(-1))){//alpha present, scalar this iteration
 			_mm_storeu_si128((__m128i*)dump, previous);
 			pixel_prev->rgba.r=dump[12];
 			pixel_prev->rgba.g=dump[13];
@@ -521,7 +521,6 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 			qoi_encode_chunk4_scalar(pixels+px_pos, bytes, &p, 16, pixel_prev, &run);
 			continue;
 		}
-		DUMP_RUN(run);
 		//no alpha, finish extracting planes then re-use rgb sse implementation
 		b=_mm_blendv_epi8(w5, w6, blend);
 		w1=_mm_unpacklo_epi32(w1, w2);//r8g8
@@ -541,6 +540,7 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 			continue;
 		}
 
+		DUMP_RUN(run);
 		SSE_ENC_RGB_16;
 	}
 	_mm_storeu_si128((__m128i*)dump, id);
@@ -564,7 +564,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 	shuf1=_mm_setr_epi8(0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15);
 	shuf2=_mm_setr_epi8(1,5,9,13,0,4,8,12,3,7,11,15,2,6,10,14);
 	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
-	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255);
+	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1);
 
 	//previous pixel
 	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
@@ -584,7 +584,7 @@ static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned ch
 		w5=_mm_unpackhi_epi32(w1, w2);//b8a8
 		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
 		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
-		if(!_mm_test_all_zeros(a, _mm_set1_epi8(0xff))){//alpha present, scalar this iteration
+		if(!_mm_test_all_zeros(a, _mm_set1_epi8(-1))){//alpha present, scalar this iteration
 			_mm_storeu_si128((__m128i*)dump, previous);
 			pixel_prev->rgba.r=dump[12];
 			pixel_prev->rgba.g=dump[13];
@@ -622,8 +622,8 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 	rshuf=_mm_setr_epi8(0,3,6,9,12,15, 2,5,8,11,14, 1,4,7,10,13);
 	gshuf=_mm_setr_epi8(1,4,7,10,13, 0,3,6,9,12,15, 2,5,8,11,14);
 	bshuf=_mm_setr_epi8(2,5,8,11,14, 1,4,7,10,13, 0,3,6,9,12,15);
-	blend1=_mm_setr_epi8(0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,0);
-	blend2=_mm_setr_epi8(0,255,0,0,255,0,0,255,0,0,255,0,0,255,0,0);
+	blend1=_mm_setr_epi8(0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0);
+	blend2=_mm_setr_epi8(0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0);
 
 	//previous pixel
 	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
@@ -634,7 +634,7 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 		LOAD16(bb, db, aa, 16, 3, 13);
 		LOAD16(cc, dc, bb, 32, 3, 13);
 
-		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(0xff))){//all RLE
+		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(-1))){//all RLE
 			run+=16;
 			continue;
 		}

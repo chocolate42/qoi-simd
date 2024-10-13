@@ -367,9 +367,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 	if((desc->width * desc->height)%CHUNK)//encode the trailing input scalar
 		enc_finish_arr[((desc->channels-3)*6)+(opt->path<<1)+(opt->norle?0:1)]((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
 			bytes, &p, ((desc->width * desc->height)%CHUNK), &px_prev, &run);
-
-	if (run)
-		bytes[p++] = QOI_OP_RUN | ((run - 1)<<3);
+	DUMP_RUN(run);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
 		bytes[p++] = qoi_padding[i];
 	*out_len = p;
@@ -573,9 +571,12 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		if(p!=fwrite(out, 1, p, fo))
 			goto BADEXIT3;
 	}
+	p=0;
+	for(;run>=30;run-=30)
+		out[p++]=QOI_OP_RUN30;
 	if(run){
-		out[0] = QOI_OP_RUN | ((run - 1)<<3);
-		if(1!=fwrite(out, 1, 1, fo))
+		out[p++] = QOI_OP_RUN | ((run - 1)<<3);
+		if(p!=fwrite(out, 1, p, fo))
 			goto BADEXIT3;
 	}
 	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
