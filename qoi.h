@@ -334,6 +334,18 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 #ifndef QOI_NO_STDIO
 #include <stdio.h>
 
+static inline FILE* qoi_fopen(const char *path, const char *mode){
+	if(0==strcmp(path, "-"))
+		return *mode=='r'?stdin:stdout;
+	else
+		return fopen(path, mode);
+}
+
+static inline void qoi_fclose(const char *path, FILE *stream){
+	if(0!=strcmp(path, "-"))
+		fclose(stream);
+}
+
 //decode to a format that contains raw pixels in RGB/A
 static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, int head_len, qoi_desc *desc, int channels, const options *opt){
 	dec_state s={0};
@@ -348,7 +360,7 @@ static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, int head_le
 	)
 		goto BADEXIT0;
 
-	if(!(fo=fopen(out_f, "wb")))
+	if(!(fo=qoi_fopen(out_f, "wb")))
 		goto BADEXIT0;
 
 	if(head_len){
@@ -377,16 +389,17 @@ static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, int head_le
 		if(advancing==s.pixel_curr)//truncated input
 			goto BADEXIT3;
 	}
+
 	QOI_FREE(s.pixels);
 	QOI_FREE(s.bytes);
-	fclose(fo);
+	qoi_fclose(out_f, fo);
 	return 0;
 	BADEXIT3:
 	QOI_FREE(s.pixels);
 	BADEXIT2:
 	QOI_FREE(s.bytes);
 	BADEXIT1:
-	fclose(fo);
+	qoi_fclose(out_f, fo);
 	BADEXIT0:
 	return 1;
 }
@@ -408,7 +421,7 @@ int qoi_read_to_pam(const char *qoi_f, const char *pam_f, const options *opt) {
 	char head[128];
 	FILE *fi;
 	qoi_desc desc;
-	if(!(fi=fopen(qoi_f, "rb")))
+	if(!(fi=qoi_fopen(qoi_f, "rb")))
 		goto BADEXIT0;
 	if(file_to_desc(fi, &desc))
 		goto BADEXIT1;
@@ -418,10 +431,10 @@ int qoi_read_to_pam(const char *qoi_f, const char *pam_f, const options *opt) {
 	if(qoi_read_to_file(fi, pam_f, head, strlen(head), &desc, desc.channels, opt))
 		goto BADEXIT1;
 
-	fclose(fi);
+	qoi_fclose(qoi_f, fi);
 	return 0;
 	BADEXIT1:
-	fclose(fi);
+	qoi_fclose(qoi_f, fi);
 	BADEXIT0:
 	return 1;
 }
@@ -430,20 +443,19 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 	char head[128];
 	FILE *fi;
 	qoi_desc desc;
-	if(!(fi=fopen(qoi_f, "rb")))
+	if(!(fi=qoi_fopen(qoi_f, "rb")))
 		goto BADEXIT0;
 	if(file_to_desc(fi, &desc))
 		goto BADEXIT1;
 
 	sprintf(head, "P6 %u %u 255\n", desc.width, desc.height);
-
 	if(qoi_read_to_file(fi, ppm_f, head, strlen(head), &desc, 3, opt))
 		goto BADEXIT1;
 
-	fclose(fi);
+	qoi_fclose(qoi_f, fi);
 	return 0;
 	BADEXIT1:
-	fclose(fi);
+	qoi_fclose(qoi_f, fi);
 	BADEXIT0:
 	return 1;
 }
@@ -456,7 +468,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	unsigned char *in, *out;
 	unsigned int i, pixels;
 
-	if(!(fo = fopen(qoi_f, "wb")))
+	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
 	if(!(in=QOI_MALLOC((CHUNK*desc->channels)+1)))
@@ -498,14 +510,14 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 
 	QOI_FREE(out);
 	QOI_FREE(in);
-	fclose(fo);
+	qoi_fclose(qoi_f, fo);
 	return 0;
 	BADEXIT3:
 	QOI_FREE(out);
 	BADEXIT2:
 	QOI_FREE(in);
 	BADEXIT1:
-	fclose(fo);
+	qoi_fclose(qoi_f, fo);
 	BADEXIT0:
 	return 1;
 }
@@ -554,7 +566,7 @@ int qoi_write_from_pam(const char *pam_f, const char *qoi_f, const options *opt)
 	unsigned int i, j;
 	FILE *fi;
 
-	if(!(fi = fopen(pam_f, "rb")))
+	if(!(fi=qoi_fopen(pam_f, "rb")))
 		goto BADEXIT0;
 
 	PAM_EXPECT('P');
@@ -604,10 +616,10 @@ int qoi_write_from_pam(const char *pam_f, const char *qoi_f, const options *opt)
 	if(qoi_write_from_file(fi, qoi_f, &desc, opt))
 		goto BADEXIT1;
 
-	fclose(fi);
+	qoi_fclose(pam_f, fi);
 	return 0;
 	BADEXIT1:
-	fclose(fi);
+	qoi_fclose(pam_f, fi);
 	BADEXIT0:
 	return 1;
 }
@@ -618,7 +630,7 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	unsigned int maxval=0;
 	FILE *fi;
 
-	if(!(fi = fopen(ppm_f, "rb")))
+	if(!(fi=qoi_fopen(ppm_f, "rb")))
 		goto BADEXIT0;
 
 	PAM_EXPECT('P');
@@ -639,10 +651,10 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	if(qoi_write_from_file(fi, qoi_f, &desc, opt))
 		goto BADEXIT1;
 
-	fclose(fi);
+	qoi_fclose(ppm_f, fi);
 	return 0;
 	BADEXIT1:
-	fclose(fi);
+	qoi_fclose(ppm_f, fi);
 	BADEXIT0:
 	return 1;
 }
