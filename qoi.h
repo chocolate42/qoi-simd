@@ -108,6 +108,8 @@ typedef struct{
 	enum codepath path;
 } options;
 
+#define QOI_HEADER_SIZE 14
+
 #ifndef QOI_NO_STDIO
 
 /* Encode raw RGB or RGBA pixels into a QOI image and write it to the file
@@ -234,7 +236,9 @@ typedef struct{
 	unsigned int b, b_limit, b_present, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
 } dec_state;
 
-#include "roi_optimised.c"
+#ifdef ROI
+#include "roi.c"
+#endif
 
 static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev, const options *opt) {
 	qoi_write_32(bytes, p, QOI_MAGIC);

@@ -70,7 +70,8 @@ This allows for optimisations on little-endian hardware, most hardware.
 #define QOI_MAGIC \
 	(((unsigned int)'r') << 24 | ((unsigned int)'o') << 16 | \
 	 ((unsigned int)'i') <<  8 | ((unsigned int)'f'))
-#define QOI_HEADER_SIZE 14
+
+#define EXT_STR "roi"
 
 //optimised encode functions////////////////////////////////////////////////////
 

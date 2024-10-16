@@ -25,16 +25,7 @@ Compile with:
 #include "stb_image_write.h"
 
 #define QOI_IMPLEMENTATION
-#ifdef ROI
-#define EXT_STR "roi"
-#include "roi.h"
-#elif defined SOI
-#define EXT_STR "soi"
-#include "soi.h"
-#else
-#define EXT_STR "qoi"
 #include "qoi.h"
-#endif
 
 #define STR_ENDS_WITH(S, E) (strcmp(S + strlen(S) - (sizeof(E)-1), E) == 0)
 
@@ -60,69 +51,65 @@ int main(int argc, char **argv) {
 			return printf("Unknown option '%s'\n", argv[i]);
 	}
 
-#ifdef ROI
-	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
+	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && (STR_ENDS_WITH(argv[argc-1], "."EXT_STR)))
 		return qoi_write_from_ppm(argv[argc-2], argv[argc-1], &opt);
-	else if ((STR_ENDS_WITH(argv[argc-2], ".roi")) && (STR_ENDS_WITH(argv[argc-1], ".ppm")))
+	else if ((STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) && (STR_ENDS_WITH(argv[argc-1], ".ppm")))
 		return qoi_read_to_ppm(argv[argc-2], argv[argc-1], &opt);
-	if ((STR_ENDS_WITH(argv[argc-2], ".pam")) && (STR_ENDS_WITH(argv[argc-1], ".roi")))
+	if ((STR_ENDS_WITH(argv[argc-2], ".pam")) && (STR_ENDS_WITH(argv[argc-1], "."EXT_STR)))
 		return qoi_write_from_pam(argv[argc-2], argv[argc-1], &opt);
-	else if ((STR_ENDS_WITH(argv[argc-2], ".roi")) && (STR_ENDS_WITH(argv[argc-1], ".pam")))
+	else if ((STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) && (STR_ENDS_WITH(argv[argc-1], ".pam")))
 		return qoi_read_to_pam(argv[argc-2], argv[argc-1], &opt);
 	else {
-#endif
 
-	void *pixels = NULL;
-	int w, h, channels;
-	if (STR_ENDS_WITH(argv[argc-2], ".png")) {
-		if(!stbi_info(argv[argc-2], &w, &h, &channels)) {
-			printf("Couldn't read header %s\n", argv[argc-2]);
+		void *pixels = NULL;
+		int w, h, channels;
+		if (STR_ENDS_WITH(argv[argc-2], ".png")) {
+			if(!stbi_info(argv[argc-2], &w, &h, &channels)) {
+				printf("Couldn't read header %s\n", argv[argc-2]);
+				exit(1);
+			}
+
+			if(channels != 3)// Force all odd encodings to be RGBA
+				channels = 4;
+
+			pixels = (void *)stbi_load(argv[argc-2], &w, &h, NULL, channels);
+			pixels = realloc(pixels, (w*h*channels)+1);
+		}
+		else if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) {
+			qoi_desc desc;
+			pixels = qoi_read(argv[argc-2], &desc, 0);
+			channels = desc.channels;
+			w = desc.width;
+			h = desc.height;
+		}
+
+		if (pixels == NULL) {
+			printf("Couldn't load/decode %s\n", argv[argc-2]);
 			exit(1);
 		}
 
-		if(channels != 3)// Force all odd encodings to be RGBA
-			channels = 4;
+		int encoded = 0;
+		if (STR_ENDS_WITH(argv[argc-1], ".png")) {
+			encoded = stbi_write_png(argv[argc-1], w, h, channels, pixels, 0);
+		}
+		else if (STR_ENDS_WITH(argv[argc-1], "."EXT_STR)) {
+			encoded = qoi_write(argv[argc-1], pixels, &(qoi_desc){
+				.width = w,
+				.height = h, 
+				.channels = channels,
+				.colorspace = QOI_SRGB
+			}, &opt);
+		}
 
-		pixels = (void *)stbi_load(argv[argc-2], &w, &h, NULL, channels);
-		pixels = realloc(pixels, (w*h*channels)+1);
-	}
-	else if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) {
-		qoi_desc desc;
-		pixels = qoi_read(argv[argc-2], &desc, 0);
-		channels = desc.channels;
-		w = desc.width;
-		h = desc.height;
-	}
+		if (!encoded) {
+			printf("Couldn't write/encode %s\n", argv[argc-1]);
+			exit(1);
+		}
 
-	if (pixels == NULL) {
-		printf("Couldn't load/decode %s\n", argv[argc-2]);
-		exit(1);
+		if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR))
+			QOI_FREE(pixels);
+		else
+			free(pixels);
 	}
-
-	int encoded = 0;
-	if (STR_ENDS_WITH(argv[argc-1], ".png")) {
-		encoded = stbi_write_png(argv[argc-1], w, h, channels, pixels, 0);
-	}
-	else if (STR_ENDS_WITH(argv[argc-1], "."EXT_STR)) {
-		encoded = qoi_write(argv[argc-1], pixels, &(qoi_desc){
-			.width = w,
-			.height = h, 
-			.channels = channels,
-			.colorspace = QOI_SRGB
-		}, &opt);
-	}
-
-	if (!encoded) {
-		printf("Couldn't write/encode %s\n", argv[argc-1]);
-		exit(1);
-	}
-
-	if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR))
-		QOI_FREE(pixels);
-	else
-		free(pixels);
-#ifdef ROI
-	}
-#endif
 	return 0;
 }

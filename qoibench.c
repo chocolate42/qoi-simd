@@ -27,19 +27,7 @@ Compile with:
 #include "stb_image_write.h"
 
 #define QOI_IMPLEMENTATION
-#ifdef ROI
-#define EXT_STR "roi"
-#include "roi.h"
-#elif defined SOI
-#define EXT_STR "soi"
-#include "soi.h"
-#else
-#define EXT_STR "qoi"
 #include "qoi.h"
-#endif
-
-
-
 
 // -----------------------------------------------------------------------------
 // Cross platform high resolution timer
