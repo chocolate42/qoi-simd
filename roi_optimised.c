@@ -100,20 +100,6 @@ static void qoi_encode_chunk3_scalar(const unsigned char *pixels, unsigned char 
 	*pp=p;
 }
 
-static void qoi_encode_chunk3_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp;
-	qoi_rgba_t px={0}, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*3;
-
-	for (px_pos = 0; px_pos <= px_end; px_pos += 3) {
-		ENC_READ_RGB;
-		RGB_ENC_SCALAR;
-		px_prev = px;
-	}
-	*pixel_prev=px_prev;
-	*pp=p;
-}
-
 static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	int p=*pp, run=*r;
 	qoi_rgba_t px, px_prev=*pixel_prev;
@@ -144,22 +130,6 @@ static void qoi_encode_chunk4_scalar(const unsigned char *pixels, unsigned char 
 	*pp=p;
 }
 
-static void qoi_encode_chunk4_scalar_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	int p=*pp;
-	qoi_rgba_t px, px_prev=*pixel_prev;
-	unsigned int px_pos, px_end=(pixel_cnt-1)*4;
-	for (px_pos = 0; px_pos <= px_end; px_pos += 4) {
-		ENC_READ_RGBA;
-		if(px.rgba.a!=px_prev.rgba.a){
-			bytes[p++] = QOI_OP_RGBA;
-			bytes[p++] = px.rgba.a;
-		}
-		RGB_ENC_SCALAR;
-		px_prev = px;
-	}
-	*pixel_prev=px_prev;
-	*pp=p;
-}
 
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
@@ -438,43 +408,6 @@ static const uint8_t writer_len[256] = {
 		p+=writer_len[(lut_index>>8)&255]; \
 }while(0)
 
-static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
-	__m128i rshuf, gshuf, bshuf, blend1, blend2;
-	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
-	int p=*pp, lut_index;
-	unsigned char dump[16];
-	unsigned int px_pos;
-
-	//constants
-	rshuf=_mm_setr_epi8(0,3,6,9,12,15, 2,5,8,11,14, 1,4,7,10,13);
-	gshuf=_mm_setr_epi8(1,4,7,10,13, 0,3,6,9,12,15, 2,5,8,11,14);
-	bshuf=_mm_setr_epi8(2,5,8,11,14, 1,4,7,10,13, 0,3,6,9,12,15);
-	blend1=_mm_setr_epi8(0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0);
-	blend2=_mm_setr_epi8(0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0);
-
-	//previous pixel
-	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b);
-	for (px_pos = 0; px_pos < pixel_cnt*3; px_pos += 48) {
-		//load and diff next 16 pixels
-		LOAD16(aa, da, cc, 0, 3, 13);
-		LOAD16(bb, db, aa, 16, 3, 13);
-		LOAD16(cc, dc, bb, 32, 3, 13);
-
-		/*convert to rgb vectors*/
-		PLANAR_SHUFFLE(r, da, db, dc, rshuf);
-		PLANAR_SHUFFLE(g, db, dc, da, gshuf);
-		PLANAR_SHUFFLE(b, dc, da, db, bshuf);
-
-		SSE_ENC_RGB_16;
-	}
-	_mm_storeu_si128((__m128i*)dump, cc);
-	pixel_prev->rgba.r=dump[13];
-	pixel_prev->rgba.g=dump[14];
-	pixel_prev->rgba.b=dump[15];
-	*pp=p;
-}
-
 static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
 	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, previous;
 	__m128i gshuf, shuf1, shuf2, blend;
@@ -552,64 +485,6 @@ static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *by
 	*rr=run;
 }
 
-static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
-	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, previous;
-	__m128i gshuf, shuf1, shuf2, blend;
-	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
-	int p=*pp, lut_index;
-	unsigned char dump[16];
-	unsigned int px_pos;
-
-	//constants
-	shuf1=_mm_setr_epi8(0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15);
-	shuf2=_mm_setr_epi8(1,5,9,13,0,4,8,12,3,7,11,15,2,6,10,14);
-	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
-	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1);
-
-	//previous pixel
-	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, pixel_prev->rgba.r, pixel_prev->rgba.g, pixel_prev->rgba.b, pixel_prev->rgba.a);
-	for (px_pos = 0; px_pos < pixel_cnt*4; px_pos += 64) {
-		//load pixels
-		previous=_mm_and_si128(id, id);
-		LOAD16(ia, da, id,  0, 4, 12);
-		LOAD16(ib, db, ia, 16, 4, 12);
-		LOAD16(ic, dc, ib, 32, 4, 12);
-		LOAD16(id, dd, ic, 48, 4, 12);
-
-		//unpack into rgba planes
-		w1=_mm_shuffle_epi8(da, shuf1);//r4g4b4a4
-		w2=_mm_shuffle_epi8(db, shuf1);//r4g4b4a4
-		w3=_mm_shuffle_epi8(dc, shuf2);//g4r4a4b4
-		w4=_mm_shuffle_epi8(dd, shuf2);//g4r4a4b4
-		w5=_mm_unpackhi_epi32(w1, w2);//b8a8
-		w6=_mm_unpackhi_epi32(w3, w4);//a8b8
-		a=_mm_blendv_epi8(w6, w5, blend);//out of order, irrelevant
-		if(!_mm_test_all_zeros(a, _mm_set1_epi8(-1))){//alpha present, scalar this iteration
-			_mm_storeu_si128((__m128i*)dump, previous);
-			pixel_prev->rgba.r=dump[12];
-			pixel_prev->rgba.g=dump[13];
-			pixel_prev->rgba.b=dump[14];
-			pixel_prev->rgba.a=dump[15];
-			qoi_encode_chunk4_scalar_norle(pixels+px_pos, bytes, &p, 16, pixel_prev, NULL);
-			continue;
-		}
-		//no alpha, finish extracting planes then re-use rgb sse implementation
-		b=_mm_blendv_epi8(w5, w6, blend);
-		w1=_mm_unpacklo_epi32(w1, w2);//r8g8
-		w2=_mm_unpacklo_epi32(w3, w4);//g8r8
-		r=_mm_blendv_epi8(w1, w2, blend);
-		g=_mm_blendv_epi8(w2, w1, blend);//out of order
-		g=_mm_shuffle_epi8(g, gshuf);//in order
-		SSE_ENC_RGB_16;
-	}
-	_mm_storeu_si128((__m128i*)dump, id);
-	pixel_prev->rgba.r=dump[12];
-	pixel_prev->rgba.g=dump[13];
-	pixel_prev->rgba.b=dump[14];
-	pixel_prev->rgba.a=dump[15];
-	*pp=p;
-}
-
 static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *rr){
 	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3, previous;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
@@ -666,17 +541,11 @@ static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *by
 }
 #else
 //not compiled with QOI_SSE, replace sse functions with scalar placeholders
-static void qoi_encode_chunk3_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	qoi_encode_chunk3_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
-}
 static void qoi_encode_chunk3_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk3_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
 static void qoi_encode_chunk4_sse(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
 	qoi_encode_chunk4_scalar(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
-}
-static void qoi_encode_chunk4_sse_norle(const unsigned char *pixels, unsigned char *bytes, int *pp, unsigned int pixel_cnt, qoi_rgba_t *pixel_prev, int *r){
-	qoi_encode_chunk4_scalar_norle(pixels, bytes, pp, pixel_cnt, pixel_prev, r);
 }
 #endif
 
@@ -812,56 +681,6 @@ static void dec_in3out3(dec_state *s){
 		s->pixels[s->px_pos + 0] = s->px.rgba.r;
 		s->pixels[s->px_pos + 1] = s->px.rgba.g;
 		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->px_pos+=3;
-		s->pixel_curr++;
-	}
-}
-
-static void dec_in4out4_norle(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		OP_RGBA_GOTO:
-		QOI_DECODE_COMMONA
-		else if (b1 == QOI_OP_RGBA) {
-			s->px.rgba.a = s->bytes[s->b++];
-			goto OP_RGBA_GOTO;
-		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->pixels[s->px_pos + 3] = s->px.rgba.a;
-		s->px_pos+=4;
-		s->pixel_curr++;
-	}
-}
-
-static void dec_in4out3_norle(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		OP_RGBA_GOTO:
-		QOI_DECODE_COMMONA
-		else if (b1 == QOI_OP_RGBA) {
-			s->px.rgba.a = s->bytes[s->b++];
-			goto OP_RGBA_GOTO;
-		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->px_pos+=3;
-		s->pixel_curr++;
-	}
-}
-
-static void dec_in3out4_norle(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		QOI_DECODE_COMMONB
-		s->pixels[s->px_pos + 3] = s->px.rgba.a;
-		s->px_pos+=4;
-		s->pixel_curr++;
-	}
-}
-
-static void dec_in3out3_norle(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		QOI_DECODE_COMMONB
 		s->px_pos+=3;
 		s->pixel_curr++;
 	}

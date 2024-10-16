@@ -433,6 +433,7 @@ benchmark_result_t benchmark_image(const char *path) {
 		channels = 4;
 
 	void *pixels = (void *)stbi_load(path, &w, &h, NULL, channels);
+	pixels=realloc(pixels, (w*h*channels)+1);
 	void *encoded_png = fload(path, &encoded_png_size);
 	void *encoded_qoi = qoi_encode(pixels, &(qoi_desc){
 			.width = w,
@@ -783,9 +784,8 @@ int main(int argc, char **argv) {
 		printf("    --nozstd3 .... don't benchmark chained zstd compression level 3\n");
 		printf("    --nozstd9 .... don't benchmark chained zstd compression level 9\n");
 		printf("    --nozstd19 ... don't benchmark chained zstd compression level 19\n");
-		printf("    --rle ........ enable RLE on "EXT_STR" encode, default disabled if possible\n");
 		printf("    --scalar ..... use scalar encode path\n");
-		printf("    --sse ........ use SSE encode path (if possible)\n");
+		printf("    --sse ........ use SSE encode path (default)\n");
 		printf("Examples\n");
 		printf("    "EXT_STR"bench 10 images/textures/\n");
 		printf("    "EXT_STR"bench 1 images/textures/ --nopng --nowarmup\n");
@@ -805,7 +805,6 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--nozstd3") == 0) { opt_nozstd3 = 1; }
 		else if (strcmp(argv[i], "--nozstd9") == 0) { opt_nozstd9 = 1; }
 		else if (strcmp(argv[i], "--nozstd19") == 0) { opt_nozstd19 = 1; }
-		else if (strcmp(argv[i], "--rle") == 0) { opt.rle = 1; }
 		else if (strcmp(argv[i], "--scalar") == 0) { opt.path = scalar; }
 		else if (strcmp(argv[i], "--sse") == 0) { opt.path = sse; }
 		else { ERROR("Unknown option %s", argv[i]); }

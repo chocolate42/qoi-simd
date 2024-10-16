@@ -43,9 +43,8 @@ int main(int argc, char **argv) {
 	if (argc < 3) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
-		puts(" -norle : Disable RLE");
-		puts(" -scalar : Use scalar instructions");
-		puts(" -sse : Use SSE instructions (default)");
+		puts(" -scalar : Use scalar instructions (default)");
+		puts(" -sse : Use SSE instructions");
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
@@ -53,9 +52,7 @@ int main(int argc, char **argv) {
 	}
 
 	for(int i=1;i<(argc-2);++i){
-		if(strcmp(argv[i], "-norle")==0)
-			opt.norle=1;
-		else if(strcmp(argv[i], "-scalar")==0)
+		if(strcmp(argv[i], "-scalar")==0)
 			opt.path=scalar;
 		else if(strcmp(argv[i], "-sse")==0)
 			opt.path=sse;
