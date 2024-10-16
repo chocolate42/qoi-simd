@@ -1,19 +1,10 @@
 /*
 
-ROI:
-Copyright (c) 2024, Matthew Ling
 SPDX-License-Identifier: MIT
 
+Copyright (c) 2024, Matthew Ling
 Adapted from QOI - The "Quite OK Image" format
 Copyright (c) 2021, Dominic Szablewski - https://phoboslab.org
-
-
--- About
-
-ROI is a simple byte format for storing lossless images. There are a handful
-of ways it does this, at its core each pixel is diffed from the previous
-pixel and stored in up to a 4 byte encoding for RGB or up to a 6 byte encoding
-for RGBA.
 
 
 -- Synopsis
@@ -22,7 +13,7 @@ for RGBA.
 // library to create the implementation.
 
 #define QOI_IMPLEMENTATION
-#include "roi.h"
+#include "qoi.h"
 
 // Encode and store an RGBA buffer to the file system. The qoi_desc describes
 // the input pixel data.
@@ -64,16 +55,12 @@ A ROI file has a 14 byte header, followed by any number of data "chunks" and an
 8-byte end marker.
 
 struct qoi_header_t {
-	char     magic[4];   // magic bytes "roif"
+	char     magic[4];   // magic bytes
 	uint32_t width;      // image width in pixels (BE)
 	uint32_t height;     // image height in pixels (BE)
 	uint8_t  channels;   // 3 = RGB, 4 = RGBA
 	uint8_t  colorspace; // 0 = sRGB with linear alpha, 1 = all channels linear
 };
-
-The colorspace byte in the header also has the second bit set if the file was
-encoded without RLE. This is applied internally and allows for decode
-optimisations.
 
 Images are encoded row by row, left to right, top to bottom. The decoder and
 encoder start with {r: 0, g: 0, b: 0, a: 255} as the previous pixel value. An
@@ -81,47 +68,6 @@ image is complete when all pixels specified by width * height have been covered.
 
 The color channels are assumed to not be premultiplied with the alpha channel
 ("un-premultiplied alpha").
-
-The format has 6 ops defined:
-* QOI_OP_LUMA232, QOI_OP_LUMA464, QOI_OP_LUMA777, QOI_OP_RGB: RGB ops, encode in
-  1/2/3/4 bytes respectively
-* QOI_OP_RUN: 1 byte RLE repeating the previous pixel 1..30 times
-* QOI_OP_RGBA: 2 byte encoding used whenever alpha changes, followed by an RGB
-  op to encode the RGB elements
-
-In detail:
-
-vr, vg, vb are red green blue diffed from the previous pixel respectively
-
-vg_r, vg_b are vr and vb respectively diffed from vg
-
-LUMA op values are stored with a bias, for example a 3 bit value is in the range
--4..3 inclusive, which is stored as 0..7 by adding 4
-
-QOI_OP_RUN: xxxxx111
-	1 byte op defining a run of repeating pixels, x=0..29 indicates runs of 1..30
-	respectively. x=30 and x=31 is reserved for use by QOI_OP_RGB and QOI_OP_RGBA
-
-QOI_OP_LUMA232: bbrrggg0
-  1 byte op that stores vg_r and vg_b in 2 bits, vg in 3 bits
-
-QOI_OP_LUMA464: gggggg01 bbbbrrrr
-  2 byte op that stores vg_r and vg_b in 4 bits, vg in 6 bits
-
-QOI_OP_LUMA777: ggggg011 rrrrrrgg bbbbbbbr
-  3 byte op that stores vg_r, vg_b and vg in 7 bits
-
-QOI_OP_RGB: 11110111 gggggggg rrrrrrrr bbbbbbbb
-  4 byte op that stores vg_r, vg_b and vg in 8 bits, without any bias
-
-QOI_OP_RGBA: 11111111 aaaaaaaa
-	2 byte op that stores the current alpha value. Always followed by an RGB op
-	to fully define a pixel
-
-The byte stream's end is marked with 7 0x00 bytes followed a single 0x01 byte.
-
-Unlike most qoi-like formats roi stores values within ops in little endian.
-This allows for optimisations on little-endian hardware, most hardware.
 
 */
 
@@ -250,24 +196,6 @@ Implementation */
 	#define QOI_ZEROARR(a) memset((a),0,sizeof(a))
 #endif
 
-#define QOI_OP_LUMA232 0x00 /* xxxxxxx0 */
-#define QOI_OP_LUMA464 0x01 /* xxxxxx01 */
-#define QOI_OP_LUMA777 0x03 /* xxxxx011 */
-#define QOI_OP_RUN     0x07 /* xxxxx111 */
-#define QOI_OP_RGB     0xf7 /* 11110111 */
-#define QOI_OP_RGBA    0xff /* 11111111 */
-
-#define QOI_OP_RUN30   0xef /* 11101111 */
-
-#define QOI_MASK_1     0x01 /* 00000001 */
-#define QOI_MASK_2     0x03 /* 00000011 */
-#define QOI_MASK_3     0x07 /* 00000111 */
-
-#define QOI_MAGIC \
-	(((unsigned int)'r') << 24 | ((unsigned int)'o') << 16 | \
-	 ((unsigned int)'i') <<  8 | ((unsigned int)'f'))
-#define QOI_HEADER_SIZE 14
-
 /* 2GB is the max file size that this implementation can safely handle. We guard
 against anything larger than that, assuming the worst case with 5 bytes per
 pixel, rounded down to a nice clean value. 400 million pixels ought to be
@@ -276,7 +204,6 @@ enough for anybody. */
 
 //the number of pixels to process per chunk when chunk processing
 //must be a multiple of 64 for simd alignment
-//65536 chosen by scalar experimentation on Ryzen 7840u
 #define CHUNK 131072
 
 typedef union {
@@ -301,6 +228,14 @@ static unsigned int qoi_read_32(const unsigned char *bytes, unsigned int *p) {
 	return a << 24 | b << 16 | c << 8 | d;
 }
 
+typedef struct{
+	unsigned char *bytes, *pixels;
+	qoi_rgba_t px;
+	unsigned int b, b_limit, b_present, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
+} dec_state;
+
+#include "roi_optimised.c"
+
 static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev, const options *opt) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
@@ -312,26 +247,6 @@ static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, 
 	px_prev->rgba.b = 0;
 	px_prev->rgba.a = desc->channels==3?0:255;//to simplify ENC_READ_RGB
 }
-
-typedef struct{
-	unsigned char *bytes, *pixels;
-	qoi_rgba_t px;
-	unsigned int b, b_limit, b_present, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
-} dec_state;
-
-#include "roi_optimised.c"
-
-//pointers to optimised encode functions
-#define ENC_ARR_INDEX ((opt->path<<1)|(desc->channels-3))
-static void (*enc_chunk_arr[])(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
-};
-static void (*enc_finish_arr[])(const unsigned char*, unsigned char*, int*, unsigned int, qoi_rgba_t*, int*)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar
-};
-
-#define DEC_ARR_INDEX (((desc->channels-3)<<1)|(channels-3))
-static void (*dec_arr[])(dec_state*)={dec_in3out3, dec_in3out4, dec_in4out3, dec_in4out4};
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
 	int i, max_size, p=0, run=0;
