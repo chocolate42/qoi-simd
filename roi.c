@@ -638,51 +638,51 @@ typedef struct{
 } dec_state;
 
 #define QOI_DECODE_COMMON \
-	;int b1 = s->bytes[s->b++]; \
+	;int b1 = s.bytes[s.b++]; \
 	if ((b1 & QOI_MASK_1) == QOI_OP_LUMA232) { \
 		int vg = ((b1>>1)&7) - 6; \
-		s->px.rgba.r += vg + ((b1 >> 4) & 3); \
-		s->px.rgba.g += vg + 2; \
-		s->px.rgba.b += vg + ((b1 >> 6) & 3); \
+		s.px.rgba.r += vg + ((b1 >> 4) & 3); \
+		s.px.rgba.g += vg + 2; \
+		s.px.rgba.b += vg + ((b1 >> 6) & 3); \
 	} \
 	else if ((b1 & QOI_MASK_2) == QOI_OP_LUMA464) { \
-		int b2=s->bytes[s->b++]; \
+		int b2=s.bytes[s.b++]; \
 		int vg = ((b1>>2)&63) - 40; \
-		s->px.rgba.r += vg + ((b2     ) & 0x0f); \
-		s->px.rgba.g += vg + 8; \
-		s->px.rgba.b += vg + ((b2 >>4) & 0x0f); \
+		s.px.rgba.r += vg + ((b2     ) & 0x0f); \
+		s.px.rgba.g += vg + 8; \
+		s.px.rgba.b += vg + ((b2 >>4) & 0x0f); \
 	} \
 	else if ((b1 & QOI_MASK_3) == QOI_OP_LUMA777) { \
-		int b2=s->bytes[s->b++]; \
-		int b3=s->bytes[s->b++]; \
+		int b2=s.bytes[s.b++]; \
+		int b3=s.bytes[s.b++]; \
 		int vg = (((b2&3)<<5)|((b1>>3)&31))-128; \
-		s->px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
-		s->px.rgba.g += vg + 64; \
-		s->px.rgba.b += vg + ((b3>>1)&127); \
+		s.px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
+		s.px.rgba.g += vg + 64; \
+		s.px.rgba.b += vg + ((b3>>1)&127); \
 	}
 
 #define QOI_DECODE_COMMONA_2 \
 	else if (b1 == QOI_OP_RGB) { \
-		signed char vg=s->bytes[s->b++]; \
-		signed char b3=s->bytes[s->b++]; \
-		signed char b4=s->bytes[s->b++]; \
-		s->px.rgba.r += vg + b3; \
-		s->px.rgba.g += vg; \
-		s->px.rgba.b += vg + b4; \
+		signed char vg=s.bytes[s.b++]; \
+		signed char b3=s.bytes[s.b++]; \
+		signed char b4=s.bytes[s.b++]; \
+		s.px.rgba.r += vg + b3; \
+		s.px.rgba.g += vg; \
+		s.px.rgba.b += vg + b4; \
 	}
 
 #define QOI_DECODE_COMMONB_2 \
 	else { \
-		signed char vg=s->bytes[s->b++]; \
-		signed char b3=s->bytes[s->b++]; \
-		signed char b4=s->bytes[s->b++]; \
-		s->px.rgba.r += vg + b3; \
-		s->px.rgba.g += vg; \
-		s->px.rgba.b += vg + b4; \
+		signed char vg=s.bytes[s.b++]; \
+		signed char b3=s.bytes[s.b++]; \
+		signed char b4=s.bytes[s.b++]; \
+		s.px.rgba.r += vg + b3; \
+		s.px.rgba.g += vg; \
+		s.px.rgba.b += vg + b4; \
 	} \
-	s->pixels[s->px_pos + 0] = s->px.rgba.r; \
-	s->pixels[s->px_pos + 1] = s->px.rgba.g; \
-	s->pixels[s->px_pos + 2] = s->px.rgba.b;
+	s.pixels[s.px_pos + 0] = s.px.rgba.r; \
+	s.pixels[s.px_pos + 1] = s.px.rgba.g; \
+	s.pixels[s.px_pos + 2] = s.px.rgba.b;
 
 #define QOI_DECODE_COMMONA \
 	QOI_DECODE_COMMON \
@@ -692,84 +692,88 @@ typedef struct{
 	QOI_DECODE_COMMON \
 	QOI_DECODE_COMMONB_2
 
-static void dec_in4out4(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		if (s->run)
-			s->run--;
+static dec_state dec_in4out4(dec_state s){
+	while( ((s.b+6)<s.b_present) && ((s.px_pos+4)<=s.p_limit) && (s.pixel_cnt!=s.pixel_curr) ){
+		if (s.run)
+			s.run--;
 		else{
 			OP_RGBA_GOTO:
 			QOI_DECODE_COMMONA
 			else if (b1 == QOI_OP_RGBA) {
-				s->px.rgba.a = s->bytes[s->b++];
+				s.px.rgba.a = s.bytes[s.b++];
 				goto OP_RGBA_GOTO;
 			}
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				s->run = ((b1>>3) & 0x1f);
+				s.run = ((b1>>3) & 0x1f);
 		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->pixels[s->px_pos + 3] = s->px.rgba.a;
-		s->px_pos+=4;
-		s->pixel_curr++;
+		s.pixels[s.px_pos + 0] = s.px.rgba.r;
+		s.pixels[s.px_pos + 1] = s.px.rgba.g;
+		s.pixels[s.px_pos + 2] = s.px.rgba.b;
+		s.pixels[s.px_pos + 3] = s.px.rgba.a;
+		s.px_pos+=4;
+		s.pixel_curr++;
 	}
+	return s;
 }
 
-static void dec_in4out3(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		if (s->run)
-			s->run--;
+static dec_state dec_in4out3(dec_state s){
+	while( ((s.b+6)<s.b_present) && ((s.px_pos+3)<=s.p_limit) && (s.pixel_cnt!=s.pixel_curr) ){
+		if (s.run)
+			s.run--;
 		else{
 			OP_RGBA_GOTO:
 			QOI_DECODE_COMMONA
 			else if (b1 == QOI_OP_RGBA) {
-				s->px.rgba.a = s->bytes[s->b++];
+				s.px.rgba.a = s.bytes[s.b++];
 				goto OP_RGBA_GOTO;
 			}
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				s->run = ((b1>>3) & 0x1f);
+				s.run = ((b1>>3) & 0x1f);
 		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->px_pos+=3;
-		s->pixel_curr++;
+		s.pixels[s.px_pos + 0] = s.px.rgba.r;
+		s.pixels[s.px_pos + 1] = s.px.rgba.g;
+		s.pixels[s.px_pos + 2] = s.px.rgba.b;
+		s.px_pos+=3;
+		s.pixel_curr++;
 	}
+	return s;
 }
 
-static void dec_in3out4(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+4)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		if (s->run)
-			s->run--;
+static dec_state dec_in3out4(dec_state s){
+	while( ((s.b+6)<s.b_present) && ((s.px_pos+4)<=s.p_limit) && (s.pixel_cnt!=s.pixel_curr) ){
+		if (s.run)
+			s.run--;
 		else{
 			QOI_DECODE_COMMONA
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				s->run = ((b1>>3) & 0x1f);
+				s.run = ((b1>>3) & 0x1f);
 		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->pixels[s->px_pos + 3] = s->px.rgba.a;
-		s->px_pos+=4;
-		s->pixel_curr++;
+		s.pixels[s.px_pos + 0] = s.px.rgba.r;
+		s.pixels[s.px_pos + 1] = s.px.rgba.g;
+		s.pixels[s.px_pos + 2] = s.px.rgba.b;
+		s.pixels[s.px_pos + 3] = s.px.rgba.a;
+		s.px_pos+=4;
+		s.pixel_curr++;
 	}
+	return s;
 }
 
-static void dec_in3out3(dec_state *s){
-	while( ((s->b+6)<s->b_present) && ((s->px_pos+3)<=s->p_limit) && (s->pixel_cnt!=s->pixel_curr) ){
-		if (s->run)
-			s->run--;
+static dec_state dec_in3out3(dec_state s){
+	while( ((s.b+6)<s.b_present) && ((s.px_pos+3)<=s.p_limit) && (s.pixel_cnt!=s.pixel_curr) ){
+		if (s.run)
+			s.run--;
 		else{
 			QOI_DECODE_COMMONA
 			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
-				s->run = ((b1>>3) & 0x1f);
+				s.run = ((b1>>3) & 0x1f);
 		}
-		s->pixels[s->px_pos + 0] = s->px.rgba.r;
-		s->pixels[s->px_pos + 1] = s->px.rgba.g;
-		s->pixels[s->px_pos + 2] = s->px.rgba.b;
-		s->px_pos+=3;
-		s->pixel_curr++;
+		s.pixels[s.px_pos + 0] = s.px.rgba.r;
+		s.pixels[s.px_pos + 1] = s.px.rgba.g;
+		s.pixels[s.px_pos + 2] = s.px.rgba.b;
+		s.px_pos+=3;
+		s.pixel_curr++;
 	}
+	return s;
 }
 
 //pointers to optimised encode functions
@@ -782,4 +786,4 @@ static enc_state (*enc_finish_arr[])(enc_state)={
 };
 
 #define DEC_ARR_INDEX (((desc->channels-3)<<1)|(channels-3))
-static void (*dec_arr[])(dec_state*)={dec_in3out3, dec_in3out4, dec_in4out3, dec_in4out4};
+static dec_state (*dec_arr[])(dec_state)={dec_in3out3, dec_in3out4, dec_in4out3, dec_in4out4};
