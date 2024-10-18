@@ -76,6 +76,22 @@ This allows for optimisations on little-endian hardware, most hardware.
 
 #define QOI_PIXEL_WORST_CASE (desc->channels==4?6:4)
 
+#define DUMP_RUN(rrr) do{ \
+	for(;rrr>=QOI_RUN_FULL_VAL;rrr-=QOI_RUN_FULL_VAL) \
+		s.bytes[s.b++] = QOI_OP_RUN_FULL; \
+	if (rrr) { \
+		s.bytes[s.b++] = QOI_OP_RUN | ((rrr - 1)<<3); \
+		rrr = 0; \
+	} \
+}while(0)
+
+//	px.rgba.r = pixels[px_pos + 0];
+//	px.rgba.g = pixels[px_pos + 1];
+//	px.rgba.b = pixels[px_pos + 2];
+#define ENC_READ_RGB do{ \
+	s.px.v=*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF; \
+}while(0)
+
 //optimised encode functions////////////////////////////////////////////////////
 
 #define RGB_ENC_SCALAR do{\

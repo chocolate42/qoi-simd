@@ -208,22 +208,6 @@ enough for anybody. */
 //must be a multiple of 64 for simd alignment
 #define CHUNK 131072
 
-#define DUMP_RUN(rrr) do{ \
-	for(;rrr>=QOI_RUN_FULL_VAL;rrr-=QOI_RUN_FULL_VAL) \
-		s.bytes[s.b++] = QOI_OP_RUN_FULL; \
-	if (rrr) { \
-		s.bytes[s.b++] = QOI_OP_RUN | ((rrr - 1)<<3); \
-		rrr = 0; \
-	} \
-}while(0)
-
-//	px.rgba.r = pixels[px_pos + 0];
-//	px.rgba.g = pixels[px_pos + 1];
-//	px.rgba.b = pixels[px_pos + 2];
-#define ENC_READ_RGB do{ \
-	s.px.v=*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF; \
-}while(0)
-
 #define ENC_READ_RGBA do{ \
 	s.px.v=*(unsigned int*)(s.pixels+s.px_pos); \
 }while(0)
@@ -267,7 +251,11 @@ static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, unsigned
 	px_prev->rgba.r = 0;
 	px_prev->rgba.g = 0;
 	px_prev->rgba.b = 0;
+#ifdef ROI
+	px_prev->rgba.a = desc->channels==3?0:255;//simplify ENC_READ_RGB
+#else
 	px_prev->rgba.a = 255;
+#endif
 }
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
@@ -371,7 +359,6 @@ static inline void qoi_fclose(const char *path, FILE *stream){
 static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head_len, qoi_desc *desc, int channels, const options *opt){
 	dec_state s={0};
 	FILE *fo;
-	unsigned int advancing;
 
 	if(
 		desc->width==0 || desc->height==0 ||
@@ -398,17 +385,16 @@ static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head
 	s.px.rgba.a=255;
 	s.pixel_cnt=desc->width*desc->height;
 	while(s.pixel_curr!=s.pixel_cnt){
-		advancing=s.pixel_curr;
 		s.b_present+=fread(s.bytes+s.b_present, 1, s.b_limit-s.b_present, fi);
 		s=dec_arr[DEC_ARR_INDEX](s);
+		if(!s.px_pos)//truncated input
+			goto BADEXIT3;
 		if(s.px_pos!=fwrite(s.pixels, 1, s.px_pos, fo))
 			goto BADEXIT3;
 		memmove(s.bytes, s.bytes+s.b, s.b_present-s.b);
 		s.b_present-=s.b;
 		s.b=0;
 		s.px_pos=0;
-		if(advancing==s.pixel_curr)//truncated input
-			goto BADEXIT3;
 	}
 
 	QOI_FREE(s.pixels);
