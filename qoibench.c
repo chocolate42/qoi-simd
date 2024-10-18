@@ -311,7 +311,7 @@ options opt={0};
 enum {
 	LIBPNG,
 	STBI,
-	QOI,
+	QOILIKE,
 	LZ4,
 	ZSTD1,
 	ZSTD3,
@@ -323,7 +323,7 @@ static const char *const lib_names[BENCH_COUNT] = {
 	// NOTE: pad with spaces so everything lines up properly
 	[LIBPNG] =  "libpng:     ",
 	[STBI]   =  "stbi:       ",
-	[QOI]    =  EXT_STR":        ",
+	[QOILIKE]    =  EXT_STR":        ",
 	[LZ4]    =  EXT_STR".lz4:    ",
 	[ZSTD1]    =  EXT_STR".zstd1:  ",
 	[ZSTD3]    =  EXT_STR".zstd3:  ",
@@ -493,7 +493,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			});
 		}
 
-		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].decode_time, {
+		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOILIKE].decode_time, {
 			qoi_desc desc;
 			void *dec_p = qoi_decode(encoded_qoi, encoded_qoi_size, &desc, channels);
 			free(dec_p);
@@ -572,7 +572,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			});
 		}
 
-		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOI].encode_time, {
+		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOILIKE].encode_time, {
 			int enc_size;
 			void *enc_p = qoi_encode(pixels, &(qoi_desc){
 				.width = w,
@@ -580,7 +580,7 @@ benchmark_result_t benchmark_image(const char *path) {
 				.channels = channels,
 					.colorspace = QOI_SRGB
 			}, &enc_size, &opt);
-			res.libs[QOI].size = enc_size;
+			res.libs[QOILIKE].size = enc_size;
 			free(enc_p);
 		});
 
