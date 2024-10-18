@@ -32,11 +32,8 @@
 //s.px.rgba.r = s.pixels[s.px_pos + 0];
 //s.px.rgba.g = s.pixels[s.px_pos + 1];
 //s.px.rgba.b = s.pixels[s.px_pos + 2];
-//s.px.v=(s.px.v&0xFF000000)|(*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF);
 #define ENC_READ_RGB do{ \
-	s.px.rgba.r = s.pixels[s.px_pos + 0]; \
-	s.px.rgba.g = s.pixels[s.px_pos + 1]; \
-	s.px.rgba.b = s.pixels[s.px_pos + 2]; \
+	s.px.v=0xFF000000|(*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF); \
 }while(0)
 
 //optimised encode functions////////////////////////////////////////////////////
