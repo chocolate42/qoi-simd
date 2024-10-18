@@ -61,7 +61,8 @@ This allows for optimisations on little-endian hardware, most hardware.
 #define QOI_OP_RGB     0xf7 /* 11110111 */
 #define QOI_OP_RGBA    0xff /* 11111111 */
 
-#define QOI_OP_RUN30   0xef /* 11101111 */
+#define QOI_OP_RUN_FULL 0xef /* 11101111 */
+#define QOI_RUN_FULL_VAL (30)
 
 #define QOI_MASK_1     0x01 /* 00000001 */
 #define QOI_MASK_2     0x03 /* 00000011 */
@@ -76,41 +77,6 @@ This allows for optimisations on little-endian hardware, most hardware.
 #define QOI_PIXEL_WORST_CASE (desc->channels==4?6:4)
 
 //optimised encode functions////////////////////////////////////////////////////
-
-static inline uint32_t peek_u32le(const uint8_t* p) {
-	return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) | ((uint32_t)(p[3]) << 24);
-}
-
-static inline void poke_u8le(uint8_t* b, int *p, uint8_t x) {
-	b[(*p)++] = x;
-}
-
-static inline void poke_u16le(uint8_t* b, int *p, uint16_t x) {
-	b[(*p)++] = x&255;
-	b[(*p)++] = (x >> 8)&255;
-}
-
-static inline void poke_u24le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = x&255;
-	b[(*p)++] = (x >> 8)&255;
-	b[(*p)++] = (x >> 16)&255;
-}
-
-static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
-	b[(*p)++] = x&255;
-	b[(*p)++] = (x >> 8)&255;
-	b[(*p)++] = (x >> 16)&255;
-	b[(*p)++] = (x >> 24)&255;
-}
-
-#define DUMP_RUN(rrr) do{ \
-	for(;rrr>=30;rrr-=30) \
-		s.bytes[s.b++] = QOI_OP_RUN30; \
-	if (rrr) { \
-		s.bytes[s.b++] = QOI_OP_RUN | ((rrr - 1)<<3); \
-		rrr = 0; \
-	} \
-}while(0)
 
 #define RGB_ENC_SCALAR do{\
 	signed char vr = s.px.rgba.r - px_prev.rgba.r;\
@@ -138,17 +104,6 @@ static inline void poke_u32le(uint8_t* b, int *p, uint32_t x) {
 	}\
 }while(0)
 
-//	px.rgba.r = pixels[px_pos + 0];
-//	px.rgba.g = pixels[px_pos + 1];
-//	px.rgba.b = pixels[px_pos + 2];
-#define ENC_READ_RGB do{ \
-	s.px.v=*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF; \
-}while(0)
-
-#define ENC_READ_RGBA do{ \
-	s.px.v=*(unsigned int*)(s.pixels+s.px_pos); \
-}while(0)
-
 typedef struct{
 	unsigned char *bytes, *pixels;
 	qoi_rgba_t px;
@@ -163,8 +118,8 @@ static enc_state qoi_encode_chunk3_scalar(enc_state s){
 		while(s.px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end){
-				for(;s.run>=30;s.run-=30)
-					s.bytes[s.b++] = QOI_OP_RUN30;
+				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
+					s.bytes[s.b++] = QOI_OP_RUN_FULL;
 				s.px_pos+=3;
 				return s;
 			}
@@ -186,8 +141,8 @@ static enc_state qoi_encode_chunk4_scalar(enc_state s){
 		while(s.px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end) {
-				for(;s.run>=30;s.run-=30)
-					s.bytes[s.b++] = QOI_OP_RUN30;
+				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
+					s.bytes[s.b++] = QOI_OP_RUN_FULL;
 				s.px_pos+=4;
 				return s;
 			}
@@ -630,7 +585,6 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 #endif
 
 //Optimised decode functions////////////////////////////////////////////////////
-
 typedef struct{
 	unsigned char *bytes, *pixels;
 	qoi_rgba_t px;
@@ -659,9 +613,7 @@ typedef struct{
 		s.px.rgba.r += vg + (((b3&1)<<6)|((b2>>2)&63)); \
 		s.px.rgba.g += vg + 64; \
 		s.px.rgba.b += vg + ((b3>>1)&127); \
-	}
-
-#define QOI_DECODE_COMMONA_2 \
+	} \
 	else if (b1 == QOI_OP_RGB) { \
 		signed char vg=s.bytes[s.b++]; \
 		signed char b3=s.bytes[s.b++]; \
@@ -671,39 +623,18 @@ typedef struct{
 		s.px.rgba.b += vg + b4; \
 	}
 
-#define QOI_DECODE_COMMONB_2 \
-	else { \
-		signed char vg=s.bytes[s.b++]; \
-		signed char b3=s.bytes[s.b++]; \
-		signed char b4=s.bytes[s.b++]; \
-		s.px.rgba.r += vg + b3; \
-		s.px.rgba.g += vg; \
-		s.px.rgba.b += vg + b4; \
-	} \
-	s.pixels[s.px_pos + 0] = s.px.rgba.r; \
-	s.pixels[s.px_pos + 1] = s.px.rgba.g; \
-	s.pixels[s.px_pos + 2] = s.px.rgba.b;
-
-#define QOI_DECODE_COMMONA \
-	QOI_DECODE_COMMON \
-	QOI_DECODE_COMMONA_2
-
-#define QOI_DECODE_COMMONB \
-	QOI_DECODE_COMMON \
-	QOI_DECODE_COMMONB_2
-
 static dec_state dec_in4out4(dec_state s){
 	while( ((s.b+6)<s.b_present) && ((s.px_pos+4)<=s.p_limit) && (s.pixel_cnt!=s.pixel_curr) ){
 		if (s.run)
 			s.run--;
 		else{
 			OP_RGBA_GOTO:
-			QOI_DECODE_COMMONA
+			QOI_DECODE_COMMON
 			else if (b1 == QOI_OP_RGBA) {
 				s.px.rgba.a = s.bytes[s.b++];
 				goto OP_RGBA_GOTO;
 			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+			else// if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 				s.run = ((b1>>3) & 0x1f);
 		}
 		s.pixels[s.px_pos + 0] = s.px.rgba.r;
@@ -722,12 +653,12 @@ static dec_state dec_in4out3(dec_state s){
 			s.run--;
 		else{
 			OP_RGBA_GOTO:
-			QOI_DECODE_COMMONA
+			QOI_DECODE_COMMON
 			else if (b1 == QOI_OP_RGBA) {
 				s.px.rgba.a = s.bytes[s.b++];
 				goto OP_RGBA_GOTO;
 			}
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+			else// if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 				s.run = ((b1>>3) & 0x1f);
 		}
 		s.pixels[s.px_pos + 0] = s.px.rgba.r;
@@ -744,8 +675,8 @@ static dec_state dec_in3out4(dec_state s){
 		if (s.run)
 			s.run--;
 		else{
-			QOI_DECODE_COMMONA
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+			QOI_DECODE_COMMON
+			else// if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 				s.run = ((b1>>3) & 0x1f);
 		}
 		s.pixels[s.px_pos + 0] = s.px.rgba.r;
@@ -763,8 +694,8 @@ static dec_state dec_in3out3(dec_state s){
 		if (s.run)
 			s.run--;
 		else{
-			QOI_DECODE_COMMONA
-			else if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
+			QOI_DECODE_COMMON
+			else// if ((b1 & QOI_MASK_3) == QOI_OP_RUN)
 				s.run = ((b1>>3) & 0x1f);
 		}
 		s.pixels[s.px_pos + 0] = s.px.rgba.r;
@@ -776,7 +707,7 @@ static dec_state dec_in3out3(dec_state s){
 	return s;
 }
 
-//pointers to optimised encode functions
+//pointers to optimised functions
 #define ENC_ARR_INDEX ((opt->path<<1)|(desc->channels-3))
 static enc_state (*enc_chunk_arr[])(enc_state)={
 	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
