@@ -215,7 +215,7 @@ typedef union {
 
 static const unsigned char qoi_padding[8] = {0,0,0,0,0,0,0,1};
 
-static void qoi_write_32(unsigned char *bytes, int *p, unsigned int v) {
+static void qoi_write_32(unsigned char *bytes, unsigned int *p, unsigned int v) {
 	bytes[(*p)++] = (0xff000000 & v) >> 24;
 	bytes[(*p)++] = (0x00ff0000 & v) >> 16;
 	bytes[(*p)++] = (0x0000ff00 & v) >> 8;
@@ -230,17 +230,15 @@ static unsigned int qoi_read_32(const unsigned char *bytes, unsigned int *p) {
 	return a << 24 | b << 16 | c << 8 | d;
 }
 
-typedef struct{
-	unsigned char *bytes, *pixels;
-	qoi_rgba_t px;
-	unsigned int b, b_limit, b_present, p, p_limit, px_pos, run, pixel_cnt, pixel_curr;
-} dec_state;
-
 #ifdef ROI
 #include "roi.c"
+#elif defined QOI
+#include "qoi.c"
+#else
+#error "Format must be defined"
 #endif
 
-static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, qoi_rgba_t *px_prev, const options *opt) {
+static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, unsigned int *p, qoi_rgba_t *px_prev) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
 	qoi_write_32(bytes, p, desc->height);
@@ -253,9 +251,8 @@ static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, int *p, 
 }
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
-	int i, max_size, p=0, run=0;
-	unsigned char *bytes;
-	qoi_rgba_t px_prev;
+	enc_state s={0};
+	int i, max_size;
 
 	if (
 		data == NULL || out_len == NULL || desc == NULL ||
@@ -268,23 +265,27 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		return NULL;
 
 	max_size =
-		desc->width * desc->height * (desc->channels + (desc->channels==4?2:1)) +
+		desc->width * desc->height * QOI_PIXEL_WORST_CASE +
 		QOI_HEADER_SIZE + sizeof(qoi_padding);
 
-	if(!(bytes = (unsigned char *) QOI_MALLOC(max_size)))
+	if(!(s.bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
+	s.pixels=(unsigned char *)data;
 
-	qoi_encode_init(desc, bytes, &p, &px_prev, opt);
-	if((desc->width * desc->height)/CHUNK)//encode most of the input as the largest multiple of chunk size for simd
-		enc_chunk_arr[ENC_ARR_INDEX]((const unsigned char *)data, bytes, &p, (desc->width * desc->height)-((desc->width * desc->height)%CHUNK), &px_prev, &run);
-	if((desc->width * desc->height)%CHUNK)//encode the trailing input scalar
-		enc_finish_arr[ENC_ARR_INDEX]((const unsigned char *)data + (((desc->width * desc->height)-((desc->width * desc->height)%CHUNK))*desc->channels),
-			bytes, &p, ((desc->width * desc->height)%CHUNK), &px_prev, &run);
-	DUMP_RUN(run);
+	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
+	if((desc->width * desc->height)/CHUNK){//encode most of the input as the largest multiple of chunk size for simd
+		s.pixel_cnt=(desc->width * desc->height)-((desc->width * desc->height)%CHUNK);
+		s=enc_chunk_arr[ENC_ARR_INDEX](s);
+	}
+	if((desc->width * desc->height)%CHUNK){//encode the trailing input scalar
+		s.pixel_cnt=(desc->width * desc->height);
+		s=enc_finish_arr[ENC_ARR_INDEX](s);
+	}
+	DUMP_RUN(s.run);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
-		bytes[p++] = qoi_padding[i];
-	*out_len = p;
-	return bytes;
+		s.bytes[s.b++] = qoi_padding[i];
+	*out_len = s.b;
+	return s.bytes;
 }
 
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
@@ -347,7 +348,7 @@ static inline void qoi_fclose(const char *path, FILE *stream){
 }
 
 //decode to a format that contains raw pixels in RGB/A
-static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, int head_len, qoi_desc *desc, int channels, const options *opt){
+static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head_len, qoi_desc *desc, int channels, const options *opt){
 	dec_state s={0};
 	FILE *fo;
 	unsigned int advancing;
@@ -462,66 +463,65 @@ int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt) {
 
 //process from an opened raw file directly
 static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *desc, const options *opt){
+	enc_state s={0};
 	FILE *fo;
-	int p=0, run=0;
-	qoi_rgba_t px_prev;
-	unsigned char *in, *out;
-	unsigned int i, pixels;
+	unsigned int i, totpixels;
 
 	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
-	if(!(in=QOI_MALLOC((CHUNK*desc->channels)+1)))
+	if(!(s.pixels=QOI_MALLOC((CHUNK*desc->channels)+1)))
 		goto BADEXIT1;
-	if(!(out=QOI_MALLOC(CHUNK*(desc->channels==3?4:6))))
+	if(!(s.bytes=QOI_MALLOC(CHUNK*QOI_PIXEL_WORST_CASE)))
 		goto BADEXIT2;
 
-	qoi_encode_init(desc, out, &p, &px_prev, opt);
-	if(p!=fwrite(out, 1, p, fo))
+	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
+	if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 		goto BADEXIT3;
 
-	pixels=desc->width*desc->height;
-	for(i=0;(i+CHUNK)<=pixels;i+=CHUNK){
-		if((CHUNK*desc->channels)!=fread(in, 1, CHUNK*desc->channels, fi))
+	totpixels=desc->width*desc->height;
+	s.pixel_cnt=CHUNK;
+	for(i=0;(i+CHUNK)<=totpixels;i+=CHUNK){
+		if((CHUNK*desc->channels)!=fread(s.pixels, 1, CHUNK*desc->channels, fi))
 			goto BADEXIT3;
-		p=0;
-		enc_chunk_arr[ENC_ARR_INDEX](in, out, &p, CHUNK, &px_prev, &run);
-		if(p!=fwrite(out, 1, p, fo))
-			goto BADEXIT3;
-	}
-	if(i<pixels){
-		if(((pixels-i)*desc->channels)!=fread(in, 1, (pixels-i)*desc->channels, fi))
-			goto BADEXIT3;
-		p=0;
-		enc_finish_arr[ENC_ARR_INDEX](in, out, &p, (pixels-i), &px_prev, &run);
-		if(p!=fwrite(out, 1, p, fo))
+		s.b=0;
+		s.px_pos=0;
+		s=enc_chunk_arr[ENC_ARR_INDEX](s);
+		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}
-	p=0;
-	for(;run>=30;run-=30)
-		out[p++]=QOI_OP_RUN30;
-	if(run){
-		out[p++] = QOI_OP_RUN | ((run - 1)<<3);
-		if(p!=fwrite(out, 1, p, fo))
+	if(i<totpixels){
+		if(((totpixels-i)*desc->channels)!=fread(s.pixels, 1, (totpixels-i)*desc->channels, fi))
+			goto BADEXIT3;
+		s.b=0;
+		s.px_pos=0;
+		s.pixel_cnt=totpixels-i;
+		s=enc_finish_arr[ENC_ARR_INDEX](s);
+		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}
+	s.b=0;
+	DUMP_RUN(s.run);
+	if(s.b && s.b!=fwrite(s.bytes, 1, s.b, fo))
+		goto BADEXIT3;
 	if(sizeof(qoi_padding)!=fwrite(qoi_padding, 1, sizeof(qoi_padding), fo))
 		goto BADEXIT3;
 
-	QOI_FREE(out);
-	QOI_FREE(in);
+	QOI_FREE(s.bytes);
+	QOI_FREE(s.pixels);
 	qoi_fclose(qoi_f, fo);
 	return 0;
 	BADEXIT3:
-	QOI_FREE(out);
+	QOI_FREE(s.bytes);
 	BADEXIT2:
-	QOI_FREE(in);
+	QOI_FREE(s.pixels);
 	BADEXIT1:
 	qoi_fclose(qoi_f, fo);
 	BADEXIT0:
 	return 1;
 }
 
+//PAM and PPM reading macros
 #define isspace(num) (num==' '||((num>=0x09) && (num<=0x0d)))
 #define isdigit(num) ((num>='0') && (num<='9'))
 
@@ -530,7 +530,6 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		goto BADEXIT1; \
 }while(0)
 
-//Read a variable from a ppm header
 #define PAM_SPACE_NUM(var) do{ \
 	if(!isspace(t)) \
 		goto BADEXIT1; \
