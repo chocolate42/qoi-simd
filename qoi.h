@@ -103,7 +103,7 @@ typedef struct {
 	unsigned char colorspace;
 } qoi_desc;
 
-enum codepath {scalar, sse};
+enum codepath {scalar, sse, mlut};
 typedef struct{
 	enum codepath path;
 } options;
@@ -118,14 +118,13 @@ number of channels (3 = RGB, 4 = RGBA) and the colorspace.
 
 The function returns 0 on failure (invalid parameters, or fopen or malloc
 failed) or the number of bytes written on success. */
-
 int qoi_write(const char *filename, const void *data, const qoi_desc *desc, const options *opt);
 
-/* Encode directly from a PPM file to a QOI file
+/* Encode directly from PAM/PPM file to file
 
 The function returns 0 on failure (invalid parameters, or fopen or malloc
 failed) or 1 on success. */
-
+int qoi_write_from_pam(const char *pam_f, const char *qoi_f, const options *opt);
 int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt);
 
 /* Read and decode a QOI image from the file system. If channels is 0, the
@@ -137,14 +136,13 @@ failed) or a pointer to the decoded pixels. On success, the qoi_desc struct
 will be filled with the description from the file header.
 
 The returned pixel data should be QOI_FREE()d after use. */
+void *qoi_read(const char *filename, qoi_desc *desc, int channels, const options *opt);
 
-void *qoi_read(const char *filename, qoi_desc *desc, int channels);
-
-/* Decode directly from a QOI file to a PPM file
+/* Decode directly from file to PAM/PPM file
 
 The function returns 0 on failure (invalid parameters, or fopen or malloc
 failed) or 1 on success. */
-
+int qoi_read_to_pam(const char *qoi_f, const char *pam_f, const options *opt);
 int qoi_read_to_ppm(const char *qoi_f, const char *ppm_f, const options *opt);
 
 #endif /* QOI_NO_STDIO */
@@ -156,7 +154,6 @@ failed) or a pointer to the encoded data on success. On success the out_len
 is set to the size in bytes of the encoded data.
 
 The returned qoi data should be QOI_FREE()d after use. */
-
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt);
 
 /* Decode a QOI image from memory.
@@ -166,7 +163,6 @@ failed) or a pointer to the decoded pixels. On success, the qoi_desc struct
 is filled with the description from the file header.
 
 The returned pixel data should be QOI_FREE()d after use. */
-
 void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels);
 
 #ifdef __cplusplus
@@ -268,7 +264,7 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
 		desc->height >= QOI_PIXELS_MAX / desc->width ||
-		opt->path>1
+		opt->path>2
 	)
 		return NULL;
 
@@ -364,7 +360,7 @@ static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head
 		desc->width==0 || desc->height==0 ||
 		desc->channels<3 || desc->channels>4 ||
 		desc->colorspace>3 ||
-		opt->path>1
+		opt->path>2
 	)
 		goto BADEXIT0;
 
@@ -473,6 +469,8 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	FILE *fo;
 	unsigned int i, totpixels;
 
+	if(opt->path>2)
+		goto BADEXIT0;
 	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
@@ -687,7 +685,7 @@ int qoi_write(const char *filename, const void *data, const qoi_desc *desc, cons
 	return err ? 0 : size;
 }
 
-void *qoi_read(const char *filename, qoi_desc *desc, int channels) {
+void *qoi_read(const char *filename, qoi_desc *desc, int channels, const options *opt) {
 	FILE *f = fopen(filename, "rb");
 	int size, bytes_read;
 	void *pixels, *data;

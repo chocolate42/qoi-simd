@@ -35,7 +35,16 @@ int main(int argc, char **argv) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
 		puts(" -scalar : Use scalar instructions (default)");
+#ifdef QOI_SSE
 		puts(" -sse : Use SSE instructions");
+#endif
+#ifdef ROI
+		puts(" -mlut : Use mega-LUT to encode (scalar) ");
+#ifndef QOI_MLUT_EMBED
+		puts(" -mlut-path file : File containing mega-LUT");
+		puts(" -mlut-gen file: Generate mega-LUT");
+#endif
+#endif
 		puts("Examples:");
 		puts("  "EXT_STR"conv input.png output."EXT_STR"");
 		puts("  "EXT_STR"conv input."EXT_STR" output.png");
@@ -45,12 +54,32 @@ int main(int argc, char **argv) {
 	for(int i=1;i<(argc-2);++i){
 		if(strcmp(argv[i], "-scalar")==0)
 			opt.path=scalar;
+#ifdef QOI_SSE
 		else if(strcmp(argv[i], "-sse")==0)
 			opt.path=sse;
+#endif
+#ifdef ROI
+		else if(strcmp(argv[i], "-mlut")==0)
+			opt.path=mlut;
+#ifndef QOI_MLUT_EMBED
+		else if(strcmp(argv[i], "-mlut-path")==0){
+			#include <fcntl.h>
+			#include <sys/mman.h>
+			int fd = open(argv[i+1], O_RDONLY);
+			qoi_mlut=mmap(NULL, 256*256*256*5, PROT_READ, MAP_SHARED, fd, 0);
+			++i;
+		}
+		else if(strcmp(argv[i], "-mlut-gen")==0)
+			return gen_mlut(argv[i+1]);
+#endif
+#endif
 		else
 			return printf("Unknown option '%s'\n", argv[i]);
 	}
-
+#ifdef ROI
+	if(opt.path==mlut && !qoi_mlut)
+		return printf("mlut path requires mlut to be present (built into executable or defined with -mlut-path file)\n");
+#endif
 	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && ((STR_ENDS_WITH(argv[argc-1], "."EXT_STR))||(0==strcmp(argv[argc-1], "-"))) )
 		return qoi_write_from_ppm(argv[argc-2], argv[argc-1], &opt);
 	else if ( ((STR_ENDS_WITH(argv[argc-2], "."EXT_STR))||(0==strcmp(argv[argc-2], "-"))) && (STR_ENDS_WITH(argv[argc-1], ".ppm")))
@@ -77,7 +106,7 @@ int main(int argc, char **argv) {
 		}
 		else if (STR_ENDS_WITH(argv[argc-2], "."EXT_STR)) {
 			qoi_desc desc;
-			pixels = qoi_read(argv[argc-2], &desc, 0);
+			pixels = qoi_read(argv[argc-2], &desc, 0, &opt);
 			channels = desc.channels;
 			w = desc.width;
 			h = desc.height;

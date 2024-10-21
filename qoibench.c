@@ -760,20 +760,28 @@ int main(int argc, char **argv) {
 	if (argc < 3) {
 		printf("Usage: "EXT_STR"bench <iterations> <directory> [options]\n");
 		printf("Options:\n");
-		printf("    --nowarmup ... don't perform a warmup run\n");
-		printf("    --nopng ...... don't run png encode/decode\n");
-		printf("    --noverify ... don't verify "EXT_STR" roundtrip\n");
-		printf("    --noencode ... don't run encoders\n");
-		printf("    --nodecode ... don't run decoders\n");
-		printf("    --norecurse .. don't descend into directories\n");
-		printf("    --onlytotals . don't print individual image results\n");
-		printf("    --nolz4 ...... don't benchmark chained lz4 compression\n");
-		printf("    --nozstd1 .... don't benchmark chained zstd compression level 1\n");
-		printf("    --nozstd3 .... don't benchmark chained zstd compression level 3\n");
-		printf("    --nozstd9 .... don't benchmark chained zstd compression level 9\n");
-		printf("    --nozstd19 ... don't benchmark chained zstd compression level 19\n");
-		printf("    --scalar ..... use scalar encode path\n");
-		printf("    --sse ........ use SSE encode path (default)\n");
+		printf(" --nowarmup       don't perform a warmup run\n");
+		printf(" --nopng          don't run png encode/decode\n");
+		printf(" --noverify       don't verify "EXT_STR" roundtrip\n");
+		printf(" --noencode       don't run encoders\n");
+		printf(" --nodecode       don't run decoders\n");
+		printf(" --norecurse      don't descend into directories\n");
+		printf(" --onlytotals     don't print individual image results\n");
+		printf(" --nolz4          don't benchmark chained lz4 compression\n");
+		printf(" --nozstd1        don't benchmark chained zstd compression level 1\n");
+		printf(" --nozstd3        don't benchmark chained zstd compression level 3\n");
+		printf(" --nozstd9        don't benchmark chained zstd compression level 9\n");
+		printf(" --nozstd19       don't benchmark chained zstd compression level 19\n");
+		printf(" --scalar         use scalar encode path (default)\n");
+#ifdef QOI_SSE
+		printf(" --sse            use SSE encode path\n");
+#endif
+#ifdef ROI
+		printf(" --mlut           use mlut encode path\n");
+#ifndef QOI_MLUT_EMBED
+		printf(" --mlut-path file use mlut encode path\n");
+#endif
+#endif
 		printf("Examples\n");
 		printf("    "EXT_STR"bench 10 images/textures/\n");
 		printf("    "EXT_STR"bench 1 images/textures/ --nopng --nowarmup\n");
@@ -794,10 +802,27 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--nozstd9") == 0) { opt_nozstd9 = 1; }
 		else if (strcmp(argv[i], "--nozstd19") == 0) { opt_nozstd19 = 1; }
 		else if (strcmp(argv[i], "--scalar") == 0) { opt.path = scalar; }
+#ifdef QOI_SSE
 		else if (strcmp(argv[i], "--sse") == 0) { opt.path = sse; }
+#endif
+#ifdef ROI
+		else if (strcmp(argv[i], "--mlut") == 0) { opt.path = mlut; }
+#ifndef QOI_MLUT_EMBED
+		else if (strcmp(argv[i], "--mlut-path") == 0 && (i+1)<argc) {
+			#include <fcntl.h>
+			#include <sys/mman.h>
+			int fd = open(argv[i+1], O_RDONLY);
+			qoi_mlut=mmap(NULL, 256*256*256*5, PROT_READ, MAP_SHARED, fd, 0);
+			++i;
+		}
+#endif
+#endif
 		else { ERROR("Unknown option %s", argv[i]); }
 	}
-
+#ifdef ROI
+	if(opt.path==mlut && !qoi_mlut)
+		return printf("mlut path requires mlut to be present (built into executable or defined with --mlut-path file)\n");
+#endif
 	opt_runs = atoi(argv[1]);
 	if (opt_runs <=0) {
 		ERROR("Invalid number of runs %d", opt_runs);
