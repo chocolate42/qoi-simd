@@ -806,8 +806,11 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--sse") == 0) { opt.path = sse; }
 #endif
 #ifdef ROI
-		else if (strcmp(argv[i], "--mlut") == 0) { opt.path = mlut; }
+		else if (strcmp(argv[i], "--mlut") == 0) { opt.mlut = 1; }
 #ifndef QOI_MLUT_EMBED
+#ifdef _WIN32
+#error TODO
+#else
 		else if (strcmp(argv[i], "--mlut-path") == 0 && (i+1)<argc) {
 			#include <fcntl.h>
 			#include <sys/mman.h>
@@ -817,10 +820,11 @@ int main(int argc, char **argv) {
 		}
 #endif
 #endif
+#endif
 		else { ERROR("Unknown option %s", argv[i]); }
 	}
 #ifdef ROI
-	if(opt.path==mlut && !qoi_mlut)
+	if(opt.mlut && !qoi_mlut)
 		return printf("mlut path requires mlut to be present (built into executable or defined with --mlut-path file)\n");
 #endif
 	opt_runs = atoi(argv[1]);

@@ -126,6 +126,139 @@ typedef struct{
 	unsigned int b, px_pos, run, pixel_cnt;
 } enc_state;
 
+static enc_state qoi_encode_chunk3_mlut(enc_state s);
+static enc_state qoi_encode_chunk4_mlut(enc_state s);
+static enc_state qoi_encode_chunk3_scalar(enc_state s);
+static enc_state qoi_encode_chunk4_scalar(enc_state s);
+static enc_state qoi_encode_chunk3_sse(enc_state s);
+static enc_state qoi_encode_chunk4_sse(enc_state s);
+
+//pointers to optimised functions
+#define ENC_ARR_INDEX ((opt->path<<1)|(desc->channels-3))
+static enc_state (*enc_arr[])(enc_state)={
+	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
+};
+
+int gen_mlut(const char *path){
+	signed char vg, vg_r, vg_b;
+	unsigned char ar, ag, ab, arb, *mlut, t;
+	unsigned int val;
+	FILE *fo;
+	qoi_rgba_t d={0};
+	mlut=malloc(256*256*256*5);
+	memset(mlut, 0, 256*256*256*5);
+	for(int rr=-128;rr<128;++rr){
+	for(int gg=-128;gg<128;++gg){
+	for(int bb=-128;bb<128;++bb){
+		d.rgba.r=rr;
+		d.rgba.g=gg;
+		d.rgba.b=bb;
+		vg=d.rgba.g;
+		vg_r = d.rgba.r - vg;
+		vg_b = d.rgba.b - vg;
+		ar = (vg_r<0)?(-vg_r)-1:vg_r;
+		ag = (vg<0)?(-vg)-1:vg;
+		ab = (vg_b<0)?(-vg_b)-1:vg_b;
+		arb = ar|ab;
+		if ( arb < 2 && ag  < 4 ) {
+			mlut[(5*d.v)]=1;
+			mlut[(5*d.v)+1]=QOI_OP_LUMA232|((vg_b+2)<<6)|((vg_r+2)<<4)|((vg+4)<<1);
+		} else if ( arb <  8 && ag  < 32 ) {
+			mlut[(5*d.v)]=2;
+			val=QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2);
+			mlut[(5*d.v)+1]=val&255;
+			mlut[(5*d.v)+2]=(val>>8)&255;
+		} else if ( (arb|ag) < 64 ) {
+			mlut[(5*d.v)]=3;
+			val=QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3);
+			mlut[(5*d.v)+1]=val&255;
+			mlut[(5*d.v)+2]=(val>>8)&255;
+			mlut[(5*d.v)+3]=(val>>16)&255;
+		} else {
+			mlut[(5*d.v)]=4;
+			mlut[(5*d.v)+1]=QOI_OP_RGB;
+			t=vg;
+			mlut[(5*d.v)+2]=t;
+			t=vg_r;
+			mlut[(5*d.v)+3]=t;
+			t=vg_b;
+			mlut[(5*d.v)+4]=t;
+		}
+	}
+	}
+	}
+	fo=fopen(path, "wb");
+	fwrite(mlut, 1, 256*256*256*5, fo);
+	fclose(fo);
+	free(mlut);
+	return 0;
+}
+
+#ifdef QOI_MLUT_EMBED
+extern char _binary_roi_mlut_start[];
+unsigned char *qoi_mlut=(unsigned char*)_binary_roi_mlut_start;
+#else
+unsigned char *qoi_mlut=NULL;
+#endif
+
+static enc_state qoi_encode_chunk3_mlut(enc_state s){
+	qoi_rgba_t px_prev=s.px, diff={0};
+	unsigned int px_end=(s.pixel_cnt-1)*3;
+	for (; s.px_pos <= px_end; s.px_pos += 3) {
+		ENC_READ_RGB;
+		while(s.px.v == px_prev.v) {
+			++s.run;
+			if(s.px_pos == px_end){
+				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
+					s.bytes[s.b++] = QOI_OP_RUN_FULL;
+				s.px_pos+=3;
+				return s;
+			}
+			s.px_pos+=3;
+			ENC_READ_RGB;
+		}
+		DUMP_RUN(s.run);
+		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
+		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
+		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
+		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
+		s.b+=qoi_mlut[diff.v*5];
+		px_prev = s.px;
+	}
+	return s;
+}
+
+static enc_state qoi_encode_chunk4_mlut(enc_state s){
+	qoi_rgba_t px_prev=s.px, diff={0};
+	unsigned int px_end=(s.pixel_cnt-1)*4;
+	for (; s.px_pos <= px_end; s.px_pos += 4) {
+		ENC_READ_RGBA;
+		while(s.px.v == px_prev.v) {
+			++s.run;
+			if(s.px_pos == px_end) {
+				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
+					s.bytes[s.b++] = QOI_OP_RUN_FULL;
+				s.px_pos+=4;
+				return s;
+			}
+			s.px_pos+=4;
+			ENC_READ_RGBA;
+		}
+		DUMP_RUN(s.run);
+		if(s.px.rgba.a!=px_prev.rgba.a){
+			s.bytes[s.b++] = QOI_OP_RGBA;
+			s.bytes[s.b++] = s.px.rgba.a;
+		}
+		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
+		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
+		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
+		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
+		s.b+=qoi_mlut[diff.v*5];
+		px_prev = s.px;
+	}
+	return s;
+}
+
 static enc_state qoi_encode_chunk3_scalar(enc_state s){
 	qoi_rgba_t px_prev=s.px;
 	unsigned int px_end=(s.pixel_cnt-1)*3;
@@ -496,7 +629,7 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 			s.px.rgba.b=dump[14];
 			s.px.rgba.a=dump[15];
 			s.pixel_cnt=(s.px_pos/4)+16;
-			s=qoi_encode_chunk4_scalar(s);
+			s=enc_arr[1](s);
 			s.px_pos-=64;
 			s.pixel_cnt=pixel_cnt_store;
 			continue;
@@ -518,7 +651,7 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 			s.px.rgba.b=dump[14];
 			s.px.rgba.a=dump[15];
 			s.pixel_cnt=(s.px_pos/4)+16;
-			s=qoi_encode_chunk4_scalar(s);
+			s=enc_arr[1](s);
 			s.px_pos-=64;
 			s.pixel_cnt=pixel_cnt_store;
 			continue;
@@ -575,7 +708,7 @@ static enc_state qoi_encode_chunk3_sse(enc_state s){
 			s.px.rgba.g=dump[14];
 			s.px.rgba.b=dump[15];
 			s.pixel_cnt=(s.px_pos/3)+16;
-			s=qoi_encode_chunk3_scalar(s);
+			s=enc_arr[0](s);
 			s.px_pos-=48;
 			s.pixel_cnt=pixel_cnt_store;
 			continue;
@@ -722,136 +855,6 @@ static dec_state dec_in3out3(dec_state s){
 	}
 	return s;
 }
-
-int gen_mlut(const char *path){
-	signed char vg, vg_r, vg_b;
-	unsigned char ar, ag, ab, arb, *mlut, t;
-	unsigned int val;
-	FILE *fo;
-	qoi_rgba_t d={0};
-	mlut=malloc(256*256*256*5);
-	memset(mlut, 0, 256*256*256*5);
-	for(int rr=-128;rr<128;++rr){
-	for(int gg=-128;gg<128;++gg){
-	for(int bb=-128;bb<128;++bb){
-		d.rgba.r=rr;
-		d.rgba.g=gg;
-		d.rgba.b=bb;
-		vg=d.rgba.g;
-		vg_r = d.rgba.r - vg;
-		vg_b = d.rgba.b - vg;
-		ar = (vg_r<0)?(-vg_r)-1:vg_r;
-		ag = (vg<0)?(-vg)-1:vg;
-		ab = (vg_b<0)?(-vg_b)-1:vg_b;
-		arb = ar|ab;
-		if ( arb < 2 && ag  < 4 ) {
-			mlut[(5*d.v)]=1;
-			mlut[(5*d.v)+1]=QOI_OP_LUMA232|((vg_b+2)<<6)|((vg_r+2)<<4)|((vg+4)<<1);
-		} else if ( arb <  8 && ag  < 32 ) {
-			mlut[(5*d.v)]=2;
-			val=QOI_OP_LUMA464|((vg_b+8)<<12)|((vg_r+8)<<8)|((vg+32)<<2);
-			mlut[(5*d.v)+1]=val&255;
-			mlut[(5*d.v)+2]=(val>>8)&255;
-		} else if ( (arb|ag) < 64 ) {
-			mlut[(5*d.v)]=3;
-			val=QOI_OP_LUMA777|((vg_b+64)<<17)|((vg_r+64)<<10)|((vg+64)<<3);
-			mlut[(5*d.v)+1]=val&255;
-			mlut[(5*d.v)+2]=(val>>8)&255;
-			mlut[(5*d.v)+3]=(val>>16)&255;
-		} else {
-			mlut[(5*d.v)]=4;
-			mlut[(5*d.v)+1]=QOI_OP_RGB;
-			t=vg;
-			mlut[(5*d.v)+2]=t;
-			t=vg_r;
-			mlut[(5*d.v)+3]=t;
-			t=vg_b;
-			mlut[(5*d.v)+4]=t;
-		}
-	}
-	}
-	}
-	fo=fopen(path, "wb");
-	fwrite(mlut, 1, 256*256*256*5, fo);
-	fclose(fo);
-	free(mlut);
-	return 0;
-}
-
-#ifdef QOI_MLUT_EMBED
-extern char _binary_roi_mlut_start[];
-unsigned char *qoi_mlut=(unsigned char*)_binary_roi_mlut_start;
-#else
-unsigned char *qoi_mlut=NULL;
-#endif
-
-static enc_state qoi_encode_chunk3_mlut(enc_state s){
-	qoi_rgba_t px_prev=s.px, diff={0};
-	unsigned int px_end=(s.pixel_cnt-1)*3;
-	for (; s.px_pos <= px_end; s.px_pos += 3) {
-		ENC_READ_RGB;
-		while(s.px.v == px_prev.v) {
-			++s.run;
-			if(s.px_pos == px_end){
-				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
-					s.bytes[s.b++] = QOI_OP_RUN_FULL;
-				s.px_pos+=3;
-				return s;
-			}
-			s.px_pos+=3;
-			ENC_READ_RGB;
-		}
-		DUMP_RUN(s.run);
-		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
-		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
-		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
-		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
-		s.b+=qoi_mlut[diff.v*5];
-		px_prev = s.px;
-	}
-	return s;
-}
-
-static enc_state qoi_encode_chunk4_mlut(enc_state s){
-	qoi_rgba_t px_prev=s.px, diff={0};
-	unsigned int px_end=(s.pixel_cnt-1)*4;
-	for (; s.px_pos <= px_end; s.px_pos += 4) {
-		ENC_READ_RGBA;
-		while(s.px.v == px_prev.v) {
-			++s.run;
-			if(s.px_pos == px_end) {
-				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
-					s.bytes[s.b++] = QOI_OP_RUN_FULL;
-				s.px_pos+=4;
-				return s;
-			}
-			s.px_pos+=4;
-			ENC_READ_RGBA;
-		}
-		DUMP_RUN(s.run);
-		if(s.px.rgba.a!=px_prev.rgba.a){
-			s.bytes[s.b++] = QOI_OP_RGBA;
-			s.bytes[s.b++] = s.px.rgba.a;
-		}
-		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
-		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
-		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
-		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
-		s.b+=qoi_mlut[diff.v*5];
-		px_prev = s.px;
-	}
-	return s;
-}
-
-
-//pointers to optimised functions
-#define ENC_ARR_INDEX ((opt->path<<1)|(desc->channels-3))
-static enc_state (*enc_chunk_arr[])(enc_state)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_sse, qoi_encode_chunk4_sse, qoi_encode_chunk3_mlut, qoi_encode_chunk4_mlut
-};
-static enc_state (*enc_finish_arr[])(enc_state)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_mlut, qoi_encode_chunk4_mlut
-};
 
 #define DEC_ARR_INDEX (((desc->channels-3)<<1)|(channels-3))
 static dec_state (*dec_arr[])(dec_state)={dec_in3out3, dec_in3out4, dec_in4out3, dec_in4out4};

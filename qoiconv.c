@@ -60,8 +60,11 @@ int main(int argc, char **argv) {
 #endif
 #ifdef ROI
 		else if(strcmp(argv[i], "-mlut")==0)
-			opt.path=mlut;
+			opt.mlut=1;
 #ifndef QOI_MLUT_EMBED
+#ifdef _WIN32
+#error TODO
+#else
 		else if(strcmp(argv[i], "-mlut-path")==0){
 			#include <fcntl.h>
 			#include <sys/mman.h>
@@ -73,11 +76,12 @@ int main(int argc, char **argv) {
 			return gen_mlut(argv[i+1]);
 #endif
 #endif
+#endif
 		else
 			return printf("Unknown option '%s'\n", argv[i]);
 	}
 #ifdef ROI
-	if(opt.path==mlut && !qoi_mlut)
+	if(opt.mlut && !qoi_mlut)
 		return printf("mlut path requires mlut to be present (built into executable or defined with -mlut-path file)\n");
 #endif
 	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && ((STR_ENDS_WITH(argv[argc-1], "."EXT_STR))||(0==strcmp(argv[argc-1], "-"))) )

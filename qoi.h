@@ -51,7 +51,7 @@ you can define QOI_MALLOC and QOI_FREE before including this library.
 
 -- Data Format
 
-A ROI file has a 14 byte header, followed by any number of data "chunks" and an
+A QOI file has a 14 byte header, followed by any number of data "chunks" and an
 8-byte end marker.
 
 struct qoi_header_t {
@@ -103,9 +103,10 @@ typedef struct {
 	unsigned char colorspace;
 } qoi_desc;
 
-enum codepath {scalar, sse, mlut};
+enum codepath {scalar, sse};
 typedef struct{
 	enum codepath path;
+	unsigned char mlut;
 } options;
 
 #define QOI_HEADER_SIZE 14
@@ -264,9 +265,15 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
 		desc->height >= QOI_PIXELS_MAX / desc->width ||
-		opt->path>2
+		opt->path>1
 	)
 		return NULL;
+#ifdef ROI
+	if(opt->mlut){
+		enc_arr[0]=qoi_encode_chunk3_mlut;
+		enc_arr[1]=qoi_encode_chunk4_mlut;
+	}
+#endif
 
 	max_size =
 		desc->width * desc->height * QOI_PIXEL_WORST_CASE +
@@ -279,11 +286,11 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
 	if((desc->width * desc->height)/CHUNK){//encode most of the input as the largest multiple of chunk size for simd
 		s.pixel_cnt=(desc->width * desc->height)-((desc->width * desc->height)%CHUNK);
-		s=enc_chunk_arr[ENC_ARR_INDEX](s);
+		s=enc_arr[ENC_ARR_INDEX](s);
 	}
 	if((desc->width * desc->height)%CHUNK){//encode the trailing input scalar
 		s.pixel_cnt=(desc->width * desc->height);
-		s=enc_finish_arr[ENC_ARR_INDEX](s);
+		s=enc_arr[desc->channels-3](s);
 	}
 	DUMP_RUN(s.run);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
@@ -314,7 +321,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 	if (
 		desc->width == 0 || desc->height == 0 ||
 		desc->channels < 3 || desc->channels > 4 ||
-		desc->colorspace > 3 ||
+		desc->colorspace > 1 ||
 		header_magic != QOI_MAGIC ||
 		desc->height >= QOI_PIXELS_MAX / desc->width
 	)
@@ -359,8 +366,7 @@ static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head
 	if(
 		desc->width==0 || desc->height==0 ||
 		desc->channels<3 || desc->channels>4 ||
-		desc->colorspace>3 ||
-		opt->path>2
+		desc->colorspace>1
 	)
 		goto BADEXIT0;
 
@@ -469,7 +475,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	FILE *fo;
 	unsigned int i, totpixels;
 
-	if(opt->path>2)
+	if(opt->path>1)
 		goto BADEXIT0;
 	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
@@ -483,6 +489,13 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 		goto BADEXIT3;
 
+#ifdef ROI
+	if(opt->mlut){
+		enc_arr[0]=qoi_encode_chunk3_mlut;
+		enc_arr[1]=qoi_encode_chunk4_mlut;
+	}
+#endif
+
 	totpixels=desc->width*desc->height;
 	s.pixel_cnt=CHUNK;
 	for(i=0;(i+CHUNK)<=totpixels;i+=CHUNK){
@@ -490,17 +503,17 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 			goto BADEXIT3;
 		s.b=0;
 		s.px_pos=0;
-		s=enc_chunk_arr[ENC_ARR_INDEX](s);
+		s=enc_arr[ENC_ARR_INDEX](s);
 		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}
-	if(i<totpixels){
+	if(i<totpixels){//finish scalar
 		if(((totpixels-i)*desc->channels)!=fread(s.pixels, 1, (totpixels-i)*desc->channels, fi))
 			goto BADEXIT3;
 		s.b=0;
 		s.px_pos=0;
 		s.pixel_cnt=totpixels-i;
-		s=enc_finish_arr[ENC_ARR_INDEX](s);
+		s=enc_arr[desc->channels-3](s);
 		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}
