@@ -33,7 +33,8 @@
 //s.px.rgba.g = s.pixels[s.px_pos + 1];
 //s.px.rgba.b = s.pixels[s.px_pos + 2];
 #define ENC_READ_RGB do{ \
-	s.px.v=0xFF000000|(*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF); \
+	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
+	s.px.rgba.a=255; \
 }while(0)
 
 //optimised encode functions////////////////////////////////////////////////////

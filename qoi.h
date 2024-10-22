@@ -206,7 +206,7 @@ enough for anybody. */
 #define CHUNK 131072
 
 #define ENC_READ_RGBA do{ \
-	s.px.v=*(unsigned int*)(s.pixels+s.px_pos); \
+	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
 }while(0)
 
 typedef union {

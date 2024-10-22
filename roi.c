@@ -89,7 +89,8 @@ This allows for optimisations on little-endian hardware, most hardware.
 //	px.rgba.g = pixels[px_pos + 1];
 //	px.rgba.b = pixels[px_pos + 2];
 #define ENC_READ_RGB do{ \
-	s.px.v=*(unsigned int*)(s.pixels+s.px_pos)&0x00FFFFFF; \
+	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
+	s.px.rgba.a=0; \
 }while(0)
 
 //optimised encode functions////////////////////////////////////////////////////
