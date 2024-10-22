@@ -27,9 +27,21 @@ Compile with:
 #define QOI_IMPLEMENTATION
 #include "qoi.h"
 
+#ifndef QOI_MLUT_EMBED
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+#endif
+
 #define STR_ENDS_WITH(S, E) (strcmp(S + strlen(S) - (sizeof(E)-1), E) == 0)
 
 int main(int argc, char **argv) {
+#ifndef QOI_MLUT_EMBED
+#ifdef _WIN32
+	HANDLE fd, file_mapping_object;
+#endif
+#endif
 	options opt={0};
 	if (argc < 3) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
@@ -62,27 +74,39 @@ int main(int argc, char **argv) {
 		else if(strcmp(argv[i], "-mlut")==0)
 			opt.mlut=1;
 #ifndef QOI_MLUT_EMBED
-#ifdef _WIN32
-#error TODO
-#else
 		else if(strcmp(argv[i], "-mlut-path")==0){
+#ifdef _WIN32
+			fd = CreateFileA(argv[i+1], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if(fd==INVALID_HANDLE_VALUE)
+				return fprintf(stderr, "CreateFileA failed\n");
+			file_mapping_object = CreateFileMappingA(fd, NULL, PAGE_READONLY, 0, 0, NULL);
+			if(NULL==file_mapping_object)
+				return fprintf(stderr, "CreateFileMappingA failed\n");
+			qoi_mlut=MapViewOfFile(file_mapping_object, FILE_MAP_READ, 0, 0, 0);
+#else
 			#include <fcntl.h>
 			#include <sys/mman.h>
+			#include <unistd.h>
 			int fd = open(argv[i+1], O_RDONLY);
+			if(-1==fd)
+				return fprintf(stderr, "open() for mmap failed\n");
 			qoi_mlut=mmap(NULL, 256*256*256*5, PROT_READ, MAP_SHARED, fd, 0);
+			if(MAP_FAILED==qoi_mlut)
+				return fprintf(stderr, "mmap failed\n");
+			close(fd);
+#endif
 			++i;
 		}
 		else if(strcmp(argv[i], "-mlut-gen")==0)
 			return gen_mlut(argv[i+1]);
 #endif
 #endif
-#endif
 		else
-			return printf("Unknown option '%s'\n", argv[i]);
+			return fprintf(stderr, "Unknown option '%s'\n", argv[i]);
 	}
 #ifdef ROI
 	if(opt.mlut && !qoi_mlut)
-		return printf("mlut path requires mlut to be present (built into executable or defined with -mlut-path file)\n");
+		return fprintf(stderr, "mlut path requires mlut to be present (built into executable or defined with -mlut-path file)\n");
 #endif
 	if ((STR_ENDS_WITH(argv[argc-2], ".ppm")) && ((STR_ENDS_WITH(argv[argc-1], "."EXT_STR))||(0==strcmp(argv[argc-1], "-"))) )
 		return qoi_write_from_ppm(argv[argc-2], argv[argc-1], &opt);
@@ -98,7 +122,7 @@ int main(int argc, char **argv) {
 		int w, h, channels;
 		if (STR_ENDS_WITH(argv[argc-2], ".png")) {
 			if(!stbi_info(argv[argc-2], &w, &h, &channels)) {
-				printf("Couldn't read header %s\n", argv[argc-2]);
+				fprintf(stderr, "Couldn't read header %s\n", argv[argc-2]);
 				exit(1);
 			}
 
@@ -117,7 +141,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (pixels == NULL) {
-			printf("Couldn't load/decode %s\n", argv[argc-2]);
+			fprintf(stderr, "Couldn't load/decode %s\n", argv[argc-2]);
 			exit(1);
 		}
 
@@ -135,7 +159,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (!encoded) {
-			printf("Couldn't write/encode %s\n", argv[argc-1]);
+			fprintf(stderr, "Couldn't write/encode %s\n", argv[argc-1]);
 			exit(1);
 		}
 
@@ -144,5 +168,16 @@ int main(int argc, char **argv) {
 		else
 			free(pixels);
 	}
+
+#ifndef QOI_MLUT_EMBED
+	if(qoi_mlut){
+#ifdef _WIN32
+		UnmapViewOfFile(qoi_mlut);
+		CloseHandle(file_mapping_object);
+		CloseHandle(fd);
+#endif
+	//munmap TODO maybe, automatically done on exit anyway
+	}
+#endif
 	return 0;
 }

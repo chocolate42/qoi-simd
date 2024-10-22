@@ -539,8 +539,8 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 }
 
 //PAM and PPM reading macros
-#define isspace(num) (num==' '||((num>=0x09) && (num<=0x0d)))
-#define isdigit(num) ((num>='0') && (num<='9'))
+#define qoi_isspace(num) (num==' '||((num>=0x09) && (num<=0x0d)))
+#define qoi_isdigit(num) ((num>='0') && (num<='9'))
 
 #define PAM_READ1 do{ \
 	if(1!=fread(&t, 1, 1, fi)) \
@@ -548,14 +548,14 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 }while(0)
 
 #define PAM_SPACE_NUM(var) do{ \
-	if(!isspace(t)) \
+	if(!qoi_isspace(t)) \
 		goto BADEXIT1; \
 	do { \
 		PAM_READ1; \
-	} while(isspace(t)); \
-	if(!isdigit(t)) \
+	} while(qoi_isspace(t)); \
+	if(!qoi_isdigit(t)) \
 		goto BADEXIT1; \
-	while(isdigit(t)){ \
+	while(qoi_isdigit(t)){ \
 		var*=10; \
 		var+=(t-'0'); \
 		PAM_READ1; \
@@ -658,7 +658,7 @@ int qoi_write_from_ppm(const char *ppm_f, const char *qoi_f, const options *opt)
 	if(t=='#'){
 		PAM_COMMENT;
 	}
-	if(!isspace(t))
+	if(!qoi_isspace(t))
 		goto BADEXIT1;
 	if(maxval>255)
 		goto BADEXIT1;

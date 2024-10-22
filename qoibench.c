@@ -757,6 +757,11 @@ void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
 }
 
 int main(int argc, char **argv) {
+#ifndef QOI_MLUT_EMBED
+#ifdef _WIN32
+	HANDLE fd, file_mapping_object;
+#endif
+#endif
 	if (argc < 3) {
 		printf("Usage: "EXT_STR"bench <iterations> <directory> [options]\n");
 		printf("Options:\n");
@@ -808,17 +813,23 @@ int main(int argc, char **argv) {
 #ifdef ROI
 		else if (strcmp(argv[i], "--mlut") == 0) { opt.mlut = 1; }
 #ifndef QOI_MLUT_EMBED
-#ifdef _WIN32
-#error TODO
-#else
 		else if (strcmp(argv[i], "--mlut-path") == 0 && (i+1)<argc) {
+#ifdef _WIN32
+			fd = CreateFileA(argv[i+1], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if(fd==INVALID_HANDLE_VALUE)
+				return printf("CreateFileA failed\n");
+			file_mapping_object = CreateFileMappingA(fd, NULL, PAGE_READONLY, 0, 0, NULL);
+			if(NULL==file_mapping_object)
+				return printf("CreateFileMappingA failed\n");
+			qoi_mlut=MapViewOfFile(file_mapping_object, FILE_MAP_READ, 0, 0, 0);
+#else
 			#include <fcntl.h>
 			#include <sys/mman.h>
 			int fd = open(argv[i+1], O_RDONLY);
 			qoi_mlut=mmap(NULL, 256*256*256*5, PROT_READ, MAP_SHARED, fd, 0);
+#endif
 			++i;
 		}
-#endif
 #endif
 #endif
 		else { ERROR("Unknown option %s", argv[i]); }
@@ -842,6 +853,17 @@ int main(int argc, char **argv) {
 	else {
 		printf("No images found in %s\n", argv[2]);
 	}
+
+#ifndef QOI_MLUT_EMBED
+	if(qoi_mlut){
+#ifdef _WIN32
+		UnmapViewOfFile(qoi_mlut);
+		CloseHandle(file_mapping_object);
+		CloseHandle(fd);
+#endif
+	//munmap TODO maybe, automatically done on exit anyway
+	}
+#endif
 
 	return 0;
 }

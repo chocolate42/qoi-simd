@@ -14,6 +14,11 @@ roiconv:
 roiconv_exe:
 	$(WC) -static -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=c99 qoiconv.c -o roiconv
 
+roiconv_mlut_exe:
+	$(WC) -c -Wall -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -DQOI_MLUT_EMBED -std=c99 qoiconv.c -o roiconv_mlut.o
+	ld -r -b binary -o roi_mlut.o roi.mlut
+	$(WC) -static roiconv_mlut.o roi_mlut.o -o roiconv_mlut
+
 # Embedded mlut versions require per-linker build options. These are for gcc
 # To generate roi.mlut first build roiconv without -DQOI_MLUT_EMBED then run ./roiconv -mlut-gen roi.mlut
 roibench_mlut:
