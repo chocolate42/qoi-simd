@@ -24,11 +24,12 @@ roi is a qoi-like format using the following ops:
 ## Benchmarks (single thread, 64 bit, Linux)
 
 ```
-# Grand total for LPCB (lossless photo compression benchmark, RGB)
-     decode_ms  encode_ms  decode_mpps  encode_mpps  size_kb   rate  Description
-qoi:  64.6        64.7        166.86        166.68    18192   57.6%  Scalar codepath, RLE
-roi:  37.8        19.3        285.33        558.16    17324   54.8%  SSE codepath on encode, no RLE
-roi:  37.6        49.7        286.97        216.83    17324   54.8%  Scalar codepath on encode, no RLE
-roi:  39.8        56.5        271.23        190.95    16799   53.2%  Scalar codepath, RLE
+LPCB benchmark
+           size       ratio encode   decode    codepath    Notes
+ppm        3462571880
+qoi        1993357658 0.576 0m8.312s 0m 6.713s Scalar
+roi        1840638105 0.532 0m6.572s 0m 5.325s Scalar
+           1840638105 0.532 0m3.311s           Scalar mlut Identical output, uses 80MiB LUT to encode
+           1840638105 0.532 0m3.222s           SSE         Identical output
 ```
 
