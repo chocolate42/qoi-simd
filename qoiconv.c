@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	for(int i=1;i<(argc-2);++i){
+	for(int i=1;i<argc;++i){
 		if(strcmp(argv[i], "-scalar")==0)
 			opt.path=scalar;
 #ifdef QOI_SSE
@@ -101,9 +101,10 @@ int main(int argc, char **argv) {
 			return gen_mlut(argv[i+1]);
 #endif
 #endif
-		else
+		else if(i<(argc-2))
 			return fprintf(stderr, "Unknown option '%s'\n", argv[i]);
 	}
+
 #ifdef ROI
 	if(opt.mlut && !qoi_mlut)
 		return fprintf(stderr, "mlut path requires mlut to be present (built into executable or defined with -mlut-path file)\n");
