@@ -110,6 +110,7 @@ typedef struct{
 } options;
 
 #define QOI_HEADER_SIZE 14
+#define UNUSED(x) { x = x; }
 
 #ifndef QOI_NO_STDIO
 
@@ -362,6 +363,7 @@ static inline void qoi_fclose(const char *path, FILE *stream){
 static int qoi_read_to_file(FILE *fi, const char *out_f, char *head, size_t head_len, qoi_desc *desc, int channels, const options *opt){
 	dec_state s={0};
 	FILE *fo;
+	UNUSED(opt);
 
 	if(
 		desc->width==0 || desc->height==0 ||
@@ -702,6 +704,7 @@ void *qoi_read(const char *filename, qoi_desc *desc, int channels, const options
 	FILE *f = fopen(filename, "rb");
 	int size, bytes_read;
 	void *pixels, *data;
+	UNUSED(opt);
 
 	if (!f)
 		return NULL;
