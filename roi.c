@@ -329,10 +329,9 @@ static enc_state qoi_encode_chunk4_scalar(enc_state s){
 
 //do (x<0)?(-x)-1:x for a single plane
 #define ABSOLUTER(plane, absolute) do{ \
-	w2=_mm_cmpgt_epi8(_mm_setzero_si128(), plane); \
-	w1=_mm_and_si128(w2, plane); \
-	w1=_mm_add_epi8(w1, _mm_set1_epi8(1)); \
+	w1=_mm_adds_epi8(plane, _mm_set1_epi8(1)); \
 	w1=_mm_abs_epi8(w1); \
+	w2=_mm_cmpgt_epi8(_mm_setzero_si128(), plane); \
 	absolute=_mm_blendv_epi8(plane, w1, w2); \
 }while(0)
 
