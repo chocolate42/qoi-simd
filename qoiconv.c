@@ -46,12 +46,8 @@ int main(int argc, char **argv) {
 	if (argc < 3) {
 		puts("Usage: "EXT_STR"conv [ops] <infile> <outfile>");
 		puts("[ops]");
-		puts(" -scalar : Use scalar instructions (default)");
-#ifdef QOI_SSE
-		puts(" -sse : Use SSE instructions");
-#endif
 #ifdef ROI
-		puts(" -mlut : Use mega-LUT to encode (scalar) ");
+		puts(" -mlut : Use mega-LUT to encode anything normally done with standard scalar");
 #ifndef QOI_MLUT_EMBED
 		puts(" -mlut-path file : File containing mega-LUT");
 		puts(" -mlut-gen file: Generate mega-LUT");
@@ -64,12 +60,7 @@ int main(int argc, char **argv) {
 	}
 
 	for(int i=1;i<argc;++i){
-		if(strcmp(argv[i], "-scalar")==0)
-			opt.path=scalar;
-#ifdef QOI_SSE
-		else if(strcmp(argv[i], "-sse")==0)
-			opt.path=sse;
-#endif
+		if(0);
 #ifdef ROI
 		else if(strcmp(argv[i], "-mlut")==0)
 			opt.mlut=1;

@@ -9,10 +9,16 @@ roibench:
 	$(CC) -Wall -O3 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=gnu99 qoibench.c -o roibench -llz4 -lpng -lzstd
 
 roiconv:
-	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=c99 qoiconv.c -o roiconv
+	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DROI -DQOI_SCALAR -std=c99 qoiconv.c -o roiconv
+
+roiconv_sse:
+	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=c99 qoiconv.c -o roiconv_sse
 
 roiconv_exe:
-	$(WC) -static -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=c99 qoiconv.c -o roiconv
+	$(WC) -static -O3 -Iwin32 -DROI -DQOI_SCALAR -std=c99 qoiconv.c -o roiconv
+
+roiconv_sse_exe:
+	$(WC) -static -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=c99 qoiconv.c -o roiconv_sse
 
 roiconv_mlut_exe:
 	$(WC) -c -Wall -O3 -Iwin32 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -DQOI_MLUT_EMBED -std=c99 qoiconv.c -o roiconv_mlut.o

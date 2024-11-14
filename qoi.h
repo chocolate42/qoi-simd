@@ -103,9 +103,7 @@ typedef struct {
 	unsigned char colorspace;
 } qoi_desc;
 
-enum codepath {scalar, sse};
 typedef struct{
-	enum codepath path;
 	unsigned char mlut;
 } options;
 
@@ -265,14 +263,17 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		desc->width == 0 || desc->height == 0 ||
 		desc->channels < 3 || desc->channels > 4 ||
 		desc->colorspace > 1 ||
-		desc->height >= QOI_PIXELS_MAX / desc->width ||
-		opt->path>1
+		desc->height >= QOI_PIXELS_MAX / desc->width
 	)
 		return NULL;
 #ifdef ROI
 	if(opt->mlut){
-		enc_arr[0]=qoi_encode_chunk3_mlut;
-		enc_arr[1]=qoi_encode_chunk4_mlut;
+		enc_finish[0]=qoi_encode_chunk3_mlut;
+		enc_finish[1]=qoi_encode_chunk4_mlut;
+#ifdef QOI_SCALAR
+		enc_bulk[0]=qoi_encode_chunk3_mlut;
+		enc_bulk[1]=qoi_encode_chunk4_mlut;
+#endif
 	}
 #endif
 
@@ -287,11 +288,11 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
 	if((desc->width * desc->height)/CHUNK){//encode most of the input as the largest multiple of chunk size for simd
 		s.pixel_cnt=(desc->width * desc->height)-((desc->width * desc->height)%CHUNK);
-		s=enc_arr[ENC_ARR_INDEX](s);
+		s=enc_bulk[desc->channels-3](s);
 	}
 	if((desc->width * desc->height)%CHUNK){//encode the trailing input scalar
 		s.pixel_cnt=(desc->width * desc->height);
-		s=enc_arr[desc->channels-3](s);
+		s=enc_finish[desc->channels-3](s);
 	}
 	DUMP_RUN(s.run);
 	for (i = 0; i < (int)sizeof(qoi_padding); i++)
@@ -477,8 +478,6 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	FILE *fo;
 	unsigned int i, totpixels;
 
-	if(opt->path>1)
-		goto BADEXIT0;
 	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
@@ -493,8 +492,12 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 
 #ifdef ROI
 	if(opt->mlut){
-		enc_arr[0]=qoi_encode_chunk3_mlut;
-		enc_arr[1]=qoi_encode_chunk4_mlut;
+		enc_finish[0]=qoi_encode_chunk3_mlut;
+		enc_finish[1]=qoi_encode_chunk4_mlut;
+#ifndef QOI_SSE
+		enc_bulk[0]=qoi_encode_chunk3_mlut;
+		enc_bulk[1]=qoi_encode_chunk4_mlut;
+#endif
 	}
 #endif
 
@@ -505,7 +508,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 			goto BADEXIT3;
 		s.b=0;
 		s.px_pos=0;
-		s=enc_arr[ENC_ARR_INDEX](s);
+		s=enc_bulk[desc->channels-3](s);
 		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}
@@ -515,7 +518,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		s.b=0;
 		s.px_pos=0;
 		s.pixel_cnt=totpixels-i;
-		s=enc_arr[desc->channels-3](s);
+		s=enc_finish[desc->channels-3](s);
 		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
 	}

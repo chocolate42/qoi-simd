@@ -127,19 +127,6 @@ typedef struct{
 	unsigned int b, px_pos, run, pixel_cnt;
 } enc_state;
 
-static enc_state qoi_encode_chunk3_mlut(enc_state s);
-static enc_state qoi_encode_chunk4_mlut(enc_state s);
-static enc_state qoi_encode_chunk3_scalar(enc_state s);
-static enc_state qoi_encode_chunk4_scalar(enc_state s);
-static enc_state qoi_encode_chunk3_sse(enc_state s);
-static enc_state qoi_encode_chunk4_sse(enc_state s);
-
-//pointers to optimised functions
-#define ENC_ARR_INDEX ((opt->path<<1)|(desc->channels-3))
-static enc_state (*enc_arr[])(enc_state)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar, qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
-};
-
 int gen_mlut(const char *path){
 	signed char vg, vg_r, vg_b;
 	unsigned char ar, ag, ab, arb, *mlut, t;
@@ -309,6 +296,8 @@ static enc_state qoi_encode_chunk4_scalar(enc_state s){
 	}
 	return s;
 }
+
+static enc_state (*enc_finish[])(enc_state)={qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar};
 
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
@@ -716,7 +705,7 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 			s.px.rgba.b=dump[14];
 			s.px.rgba.a=dump[15];
 			s.pixel_cnt=(s.px_pos/4)+16;
-			s=enc_arr[1](s);
+			s=enc_finish[1](s);
 			s.px_pos-=64;
 			s.pixel_cnt=pixel_cnt_store;
 			continue;
@@ -795,15 +784,18 @@ static enc_state qoi_encode_chunk3_sse(enc_state s){
 	s.px.rgba.b=dump[15];
 	return s;
 }
-#else
-//not compiled with QOI_SSE, replace sse functions with scalar placeholders
-static enc_state qoi_encode_chunk3_sse(enc_state s){
-	return qoi_encode_chunk3_scalar(s);
-}
-static enc_state qoi_encode_chunk4_sse(enc_state s){
-	return qoi_encode_chunk4_scalar(s);
-}
 #endif
+
+//pointers to optimised functions
+static enc_state (*enc_bulk[])(enc_state)={
+#ifdef QOI_SCALAR
+	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar
+#elif defined QOI_SSE
+	qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
+#else
+#error "Must define instruction set at compile time. One of: QOI_SCALAR QOI_SSE"
+#endif
+};
 
 //Optimised decode functions////////////////////////////////////////////////////
 typedef struct{

@@ -778,13 +778,10 @@ int main(int argc, char **argv) {
 		printf(" --nozstd9        don't benchmark chained zstd compression level 9\n");
 		printf(" --nozstd19       don't benchmark chained zstd compression level 19\n");
 		printf(" --scalar         use scalar encode path (default)\n");
-#ifdef QOI_SSE
-		printf(" --sse            use SSE encode path\n");
-#endif
 #ifdef ROI
-		printf(" --mlut           use mlut encode path\n");
+		printf(" --mlut           use mlut on encode\n");
 #ifndef QOI_MLUT_EMBED
-		printf(" --mlut-path file use mlut encode path\n");
+		printf(" --mlut-path file mlut file\n");
 #endif
 #endif
 		printf("Examples\n");
@@ -806,10 +803,6 @@ int main(int argc, char **argv) {
 		else if (strcmp(argv[i], "--nozstd3") == 0) { opt_nozstd3 = 1; }
 		else if (strcmp(argv[i], "--nozstd9") == 0) { opt_nozstd9 = 1; }
 		else if (strcmp(argv[i], "--nozstd19") == 0) { opt_nozstd19 = 1; }
-		else if (strcmp(argv[i], "--scalar") == 0) { opt.path = scalar; }
-#ifdef QOI_SSE
-		else if (strcmp(argv[i], "--sse") == 0) { opt.path = sse; }
-#endif
 #ifdef ROI
 		else if (strcmp(argv[i], "--mlut") == 0) { opt.mlut = 1; }
 #ifndef QOI_MLUT_EMBED
