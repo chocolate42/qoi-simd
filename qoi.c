@@ -268,10 +268,8 @@ static dec_state dec_in3out3(dec_state s){
 }
 
 //pointers to optimised functions
-#define ENC_ARR_INDEX (desc->channels-3)
-static enc_state (*enc_arr[])(enc_state)={
-	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar
-};
+static enc_state (*enc_bulk[])(enc_state)={qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar};
+static enc_state (*enc_finish[])(enc_state)={qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar};
 
 #define DEC_ARR_INDEX (((desc->channels-3)<<1)|(channels-3))
 static dec_state (*dec_arr[])(dec_state)={dec_in3out3, dec_in3out4, dec_in4out3, dec_in4out4};

@@ -177,17 +177,17 @@ Implementation */
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef QOI_SSE
+#ifndef QOI_SCALAR
 #include <immintrin.h>
 #endif
 
 #ifndef QOI_MALLOC
-	#ifdef QOI_SSE
-		#define QOI_MALLOC(sz) _mm_malloc(sz, 64)
-		#define QOI_FREE(p)    _mm_free(p)
-	#else
+	#ifdef QOI_SCALAR
 		#define QOI_MALLOC(sz) malloc(sz)
 		#define QOI_FREE(p)    free(p)
+	#else
+		#define QOI_MALLOC(sz) _mm_malloc(sz, 64)
+		#define QOI_FREE(p)    _mm_free(p)
 	#endif
 #endif
 #ifndef QOI_ZEROARR
@@ -275,6 +275,8 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 		enc_bulk[1]=qoi_encode_chunk4_mlut;
 #endif
 	}
+#else
+	UNUSED(opt);
 #endif
 
 	max_size =
@@ -494,11 +496,13 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	if(opt->mlut){
 		enc_finish[0]=qoi_encode_chunk3_mlut;
 		enc_finish[1]=qoi_encode_chunk4_mlut;
-#ifndef QOI_SSE
+#ifdef QOI_SCALAR
 		enc_bulk[0]=qoi_encode_chunk3_mlut;
 		enc_bulk[1]=qoi_encode_chunk4_mlut;
 #endif
 	}
+#else
+	UNUSED(opt);
 #endif
 
 	totpixels=desc->width*desc->height;

@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
 		else
 			free(pixels);
 	}
-
+#ifdef ROI
 #ifndef QOI_MLUT_EMBED
 	if(qoi_mlut){
 #ifdef _WIN32
@@ -170,6 +170,7 @@ int main(int argc, char **argv) {
 #endif
 	//munmap TODO maybe, automatically done on exit anyway
 	}
+#endif
 #endif
 	return 0;
 }

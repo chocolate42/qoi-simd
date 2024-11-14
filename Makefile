@@ -40,10 +40,10 @@ roiconv_mlut:
 
 # Codebase can build for QOI too
 qoiconv:
-	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DQOI -std=c99 qoiconv.c -o qoiconv
+	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DQOI -DQOI_SCALAR -std=c99 qoiconv.c -o qoiconv
 
 qoibench:
-	$(CC) -Wall -O3 -DQOI -std=gnu99 qoibench.c -o qoibench -llz4 -lpng -lzstd
+	$(CC) -Wall -O3 -DQOI -DQOI_SCALAR -std=gnu99 qoibench.c -o qoibench -llz4 -lpng -lzstd
 
 .PHONY: clean
 clean:
