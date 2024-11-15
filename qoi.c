@@ -33,16 +33,16 @@
 //s.px.rgba.g = s.pixels[s.px_pos + 1];
 //s.px.rgba.b = s.pixels[s.px_pos + 2];
 #define ENC_READ_RGB do{ \
-	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
-	s.px.v=s.px.v|0xFF000000; \
+	memcpy(&px, s.pixels+s.px_pos, 4); \
+	px.v=px.v|0xFF000000; \
 }while(0)
 
 //optimised encode functions////////////////////////////////////////////////////
 
 #define RGB_ENC_SCALAR do{\
-	signed char vr = s.px.rgba.r - px_prev.rgba.r;\
-	signed char vg = s.px.rgba.g - px_prev.rgba.g;\
-	signed char vb = s.px.rgba.b - px_prev.rgba.b;\
+	signed char vr = px.rgba.r - px_prev.rgba.r;\
+	signed char vg = px.rgba.g - px_prev.rgba.g;\
+	signed char vb = px.rgba.b - px_prev.rgba.b;\
 	signed char vg_r = vr - vg;\
 	signed char vg_b = vb - vg;\
 	unsigned char ag = (vg<0)?(-vg)-1:vg;\
@@ -63,24 +63,27 @@
 	}\
 	else {\
 		s.bytes[s.b++] = QOI_OP_RGB;\
-		s.bytes[s.b++] = s.px.rgba.r;\
-		s.bytes[s.b++] = s.px.rgba.g;\
-		s.bytes[s.b++] = s.px.rgba.b;\
+		s.bytes[s.b++] = px.rgba.r;\
+		s.bytes[s.b++] = px.rgba.g;\
+		s.bytes[s.b++] = px.rgba.b;\
 	}\
 }while(0)
 
 typedef struct{
-	unsigned char *bytes, *pixels;
-	qoi_rgba_t px, index[64];
+	unsigned char *bytes, *pixels, *pixels_alloc;
+	qoi_rgba_t index[64];
 	unsigned int b, px_pos, run, pixel_cnt;
 } enc_state;
 
 static enc_state qoi_encode_chunk3_scalar(enc_state s){
-	qoi_rgba_t px_prev=s.px;
+	qoi_rgba_t px, px_prev;
 	unsigned int px_end=(s.pixel_cnt-1)*3;
+	memcpy(&px_prev, s.pixels+s.px_pos-3, 4);
+	px_prev.v&=0x00FFFFFF;
+	px_prev.rgba.a=255;
 	for (; s.px_pos <= px_end; s.px_pos += 3) {
 		ENC_READ_RGB;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end) {
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -92,26 +95,27 @@ static enc_state qoi_encode_chunk3_scalar(enc_state s){
 			ENC_READ_RGB;
 		}
 		DUMP_RUN(s.run);
-		int index_pos = QOI_COLOR_HASH(s.px) & 63;
-		if(s.index[index_pos].v == s.px.v) {
+		int index_pos = QOI_COLOR_HASH(px) & 63;
+		if(s.index[index_pos].v == px.v) {
 			s.bytes[s.b++] = QOI_OP_INDEX | index_pos;
-			px_prev = s.px;
+			px_prev = px;
 			continue;
 		}
-		s.index[index_pos] = s.px;
+		s.index[index_pos] = px;
 
 		RGB_ENC_SCALAR;
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
 
 static enc_state qoi_encode_chunk4_scalar(enc_state s){
-	qoi_rgba_t px_prev=s.px;
+	qoi_rgba_t px, px_prev;
 	unsigned int px_end=(s.pixel_cnt-1)*4;
+	memcpy(&px_prev, s.pixels+s.px_pos-4, 4);
 	for (; s.px_pos <= px_end; s.px_pos += 4) {
 		ENC_READ_RGBA;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end) {
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -123,25 +127,25 @@ static enc_state qoi_encode_chunk4_scalar(enc_state s){
 			ENC_READ_RGBA;
 		}
 		DUMP_RUN(s.run);
-		int index_pos = QOI_COLOR_HASH(s.px) & 63;
-		if(s.index[index_pos].v == s.px.v) {
+		int index_pos = QOI_COLOR_HASH(px) & 63;
+		if(s.index[index_pos].v == px.v) {
 			s.bytes[s.b++] = QOI_OP_INDEX | index_pos;
-			px_prev = s.px;
+			px_prev = px;
 			continue;
 		}
-		s.index[index_pos] = s.px;
+		s.index[index_pos] = px;
 
-		if(s.px.rgba.a!=px_prev.rgba.a){
+		if(px.rgba.a!=px_prev.rgba.a){
 			s.bytes[s.b++] = QOI_OP_RGBA;
-			s.bytes[s.b++] = s.px.rgba.r;
-			s.bytes[s.b++] = s.px.rgba.g;
-			s.bytes[s.b++] = s.px.rgba.b;
-			s.bytes[s.b++] = s.px.rgba.a;
-			px_prev = s.px;
+			s.bytes[s.b++] = px.rgba.r;
+			s.bytes[s.b++] = px.rgba.g;
+			s.bytes[s.b++] = px.rgba.b;
+			s.bytes[s.b++] = px.rgba.a;
+			px_prev = px;
 			continue;
 		}
 		RGB_ENC_SCALAR;
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
