@@ -89,16 +89,16 @@ This allows for optimisations on little-endian hardware, most hardware.
 //	px.rgba.g = pixels[px_pos + 1];
 //	px.rgba.b = pixels[px_pos + 2];
 #define ENC_READ_RGB do{ \
-	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
-	s.px.v&=0x00FFFFFF; \
+	memcpy(&px, s.pixels+s.px_pos, 4); \
+	px.v&=0x00FFFFFF; \
 }while(0)
 
 //optimised encode functions////////////////////////////////////////////////////
 
 #define RGB_ENC_SCALAR do{\
-	signed char vr = s.px.rgba.r - px_prev.rgba.r;\
-	signed char vg = s.px.rgba.g - px_prev.rgba.g;\
-	signed char vb = s.px.rgba.b - px_prev.rgba.b;\
+	signed char vr = px.rgba.r - px_prev.rgba.r;\
+	signed char vg = px.rgba.g - px_prev.rgba.g;\
+	signed char vb = px.rgba.b - px_prev.rgba.b;\
 	signed char vg_r = vr - vg;\
 	signed char vg_b = vb - vg;\
 	unsigned char ar = (vg_r<0)?(-vg_r)-1:vg_r;\
@@ -122,8 +122,7 @@ This allows for optimisations on little-endian hardware, most hardware.
 }while(0)
 
 typedef struct{
-	unsigned char *bytes, *pixels;
-	qoi_rgba_t px;
+	unsigned char *bytes, *pixels, *pixels_alloc;
 	unsigned int b, px_pos, run, pixel_cnt;
 } enc_state;
 
@@ -190,11 +189,13 @@ unsigned char *qoi_mlut=NULL;
 #endif
 
 static enc_state qoi_encode_chunk3_mlut(enc_state s){
-	qoi_rgba_t px_prev=s.px, diff={0};
+	qoi_rgba_t px, px_prev, diff={0};
 	unsigned int px_end=(s.pixel_cnt-1)*3;
+	memcpy(&px_prev, s.pixels+s.px_pos-3, 4);
+	px_prev.v&=0x00FFFFFF;
 	for (; s.px_pos <= px_end; s.px_pos += 3) {
 		ENC_READ_RGB;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end){
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -206,22 +207,23 @@ static enc_state qoi_encode_chunk3_mlut(enc_state s){
 			ENC_READ_RGB;
 		}
 		DUMP_RUN(s.run);
-		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
-		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
-		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
+		diff.rgba.r=px.rgba.r-px_prev.rgba.r;
+		diff.rgba.g=px.rgba.g-px_prev.rgba.g;
+		diff.rgba.b=px.rgba.b-px_prev.rgba.b;
 		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
 		s.b+=qoi_mlut[diff.v*5];
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
 
 static enc_state qoi_encode_chunk4_mlut(enc_state s){
-	qoi_rgba_t px_prev=s.px, diff={0};
+	qoi_rgba_t px, px_prev, diff={0};
 	unsigned int px_end=(s.pixel_cnt-1)*4;
+	memcpy(&px_prev, s.pixels+s.px_pos-4, 4);
 	for (; s.px_pos <= px_end; s.px_pos += 4) {
 		ENC_READ_RGBA;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end) {
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -233,26 +235,28 @@ static enc_state qoi_encode_chunk4_mlut(enc_state s){
 			ENC_READ_RGBA;
 		}
 		DUMP_RUN(s.run);
-		if(s.px.rgba.a!=px_prev.rgba.a){
+		if(px.rgba.a!=px_prev.rgba.a){
 			s.bytes[s.b++] = QOI_OP_RGBA;
-			s.bytes[s.b++] = s.px.rgba.a;
+			s.bytes[s.b++] = px.rgba.a;
 		}
-		diff.rgba.r=s.px.rgba.r-px_prev.rgba.r;
-		diff.rgba.g=s.px.rgba.g-px_prev.rgba.g;
-		diff.rgba.b=s.px.rgba.b-px_prev.rgba.b;
+		diff.rgba.r=px.rgba.r-px_prev.rgba.r;
+		diff.rgba.g=px.rgba.g-px_prev.rgba.g;
+		diff.rgba.b=px.rgba.b-px_prev.rgba.b;
 		*(unsigned int*)(s.bytes+s.b)=*(unsigned int*)(qoi_mlut+(diff.v*5)+1);
 		s.b+=qoi_mlut[diff.v*5];
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
 
 static enc_state qoi_encode_chunk3_scalar(enc_state s){
-	qoi_rgba_t px_prev=s.px;
+	qoi_rgba_t px, px_prev={0};
 	unsigned int px_end=(s.pixel_cnt-1)*3;
+	memcpy(&px_prev, s.pixels+s.px_pos-3, 4);
+	px_prev.v&=0x00FFFFFF;
 	for (; s.px_pos <= px_end; s.px_pos += 3) {
 		ENC_READ_RGB;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end){
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -265,17 +269,18 @@ static enc_state qoi_encode_chunk3_scalar(enc_state s){
 		}
 		DUMP_RUN(s.run);
 		RGB_ENC_SCALAR;
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
 
 static enc_state qoi_encode_chunk4_scalar(enc_state s){
-	qoi_rgba_t px_prev=s.px;
+	qoi_rgba_t px, px_prev;
 	unsigned int px_end=(s.pixel_cnt-1)*4;
+	memcpy(&px_prev, s.pixels+s.px_pos-4, 4);
 	for (; s.px_pos <= px_end; s.px_pos += 4) {
 		ENC_READ_RGBA;
-		while(s.px.v == px_prev.v) {
+		while(px.v == px_prev.v) {
 			++s.run;
 			if(s.px_pos == px_end) {
 				for(;s.run>=QOI_RUN_FULL_VAL;s.run-=QOI_RUN_FULL_VAL)
@@ -287,12 +292,12 @@ static enc_state qoi_encode_chunk4_scalar(enc_state s){
 			ENC_READ_RGBA;
 		}
 		DUMP_RUN(s.run);
-		if(s.px.rgba.a!=px_prev.rgba.a){
+		if(px.rgba.a!=px_prev.rgba.a){
 			s.bytes[s.b++] = QOI_OP_RGBA;
-			s.bytes[s.b++] = s.px.rgba.a;
+			s.bytes[s.b++] = px.rgba.a;
 		}
 		RGB_ENC_SCALAR;
-		px_prev = s.px;
+		px_prev = px;
 	}
 	return s;
 }
@@ -301,12 +306,10 @@ static enc_state (*enc_finish[])(enc_state)={qoi_encode_chunk3_scalar, qoi_encod
 
 #ifdef QOI_SSE
 //load the next 16 bytes, diff pixels
-#define LOAD16(raw, diff, prev, offset, lshift, rshift) do{ \
-	raw=_mm_loadu_si128((__m128i const*)(s.pixels+s.px_pos+offset)); \
-	diff=_mm_slli_si128(raw, lshift); \
-	prev=_mm_srli_si128(prev, rshift); \
-	diff=_mm_or_si128(diff, prev); \
-	diff=_mm_sub_epi8(raw, diff); \
+#define LOAD16(diff, offset, psize) do{ \
+	w1=_mm_loadu_si128((__m128i const*)(s.pixels+s.px_pos+offset)); \
+	diff=_mm_loadu_si128((__m128i const*)((s.pixels+s.px_pos+offset)-psize)); \
+	diff=_mm_sub_epi8(w1, diff); \
 }while(0)
 
 //de-interleave one plane from 3 vectors containing RGB
@@ -661,7 +664,7 @@ static const uint8_t writer_len[256] = {
 }while(0)
 
 static enc_state qoi_encode_chunk4_sse(enc_state s){
-	__m128i ia, ib, ic, id, da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6, previous;
+	__m128i da, db, dc, dd, r, g, b, a, ar, ag, ab, arb, w1, w2, w3, w4, w5, w6;
 	__m128i gshuf, shuf1, shuf2, blend;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int lut_index=0;
@@ -674,14 +677,12 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 	gshuf=_mm_setr_epi8(8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7);
 	blend=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, -1, -1, -1);
 
-	id=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, s.px.rgba.r, s.px.rgba.g, s.px.rgba.b, s.px.rgba.a);//prev pixel
 	for (; s.px_pos < s.pixel_cnt*4; s.px_pos += 64) {
 		//load pixels
-		previous=_mm_and_si128(id, id);
-		LOAD16(ia, da, id,  0, 4, 12);
-		LOAD16(ib, db, ia, 16, 4, 12);
-		LOAD16(ic, dc, ib, 32, 4, 12);
-		LOAD16(id, dd, ic, 48, 4, 12);
+		LOAD16(da,  0, 4);
+		LOAD16(db, 16, 4);
+		LOAD16(dc, 32, 4);
+		LOAD16(dd, 48, 4);
 
 		if(_mm_test_all_zeros( _mm_or_si128(_mm_or_si128(da, db), _mm_or_si128(dc, dd)), _mm_set1_epi8(-1))){//all RLE
 			s.run+=16;
@@ -699,11 +700,6 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 		if(!_mm_test_all_zeros(a, _mm_set1_epi8(-1))){//alpha present, scalar this iteration
 			//TODO ditch this scalar code, make a parallel alpha op vector and zip together with rgb vector
 			unsigned int pixel_cnt_store=s.pixel_cnt;
-			_mm_storeu_si128((__m128i*)dump, previous);
-			s.px.rgba.r=dump[12];
-			s.px.rgba.g=dump[13];
-			s.px.rgba.b=dump[14];
-			s.px.rgba.a=dump[15];
 			s.pixel_cnt=(s.px_pos/4)+16;
 			s=enc_finish[1](s);
 			s.px_pos-=64;
@@ -728,16 +724,11 @@ static enc_state qoi_encode_chunk4_sse(enc_state s){
 			QOI_SSE_QUICK;
 		}
 	}
-	_mm_storeu_si128((__m128i*)dump, id);
-	s.px.rgba.r=dump[12];
-	s.px.rgba.g=dump[13];
-	s.px.rgba.b=dump[14];
-	s.px.rgba.a=dump[15];
 	return s;
 }
 
 static enc_state qoi_encode_chunk3_sse(enc_state s){
-	__m128i aa, bb, cc, da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
+	__m128i da, db, dc, r, g, b, ar, ag, ab, arb, w1, w2, w3;
 	__m128i rshuf, gshuf, bshuf, blend1, blend2;
 	__m128i op1, op2, op3, op4, opuse, res0, res1, res2, res3;
 	int lut_index=0;
@@ -751,12 +742,11 @@ static enc_state qoi_encode_chunk3_sse(enc_state s){
 	blend1=_mm_setr_epi8(0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0);
 	blend2=_mm_setr_epi8(0,-1,0,0,-1,0,0,-1,0,0,-1,0,0,-1,0,0);
 
-	cc=_mm_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, s.px.rgba.r, s.px.rgba.g, s.px.rgba.b);//prev pixel
 	for (; s.px_pos < s.pixel_cnt*3; s.px_pos += 48) {
 		//load and diff next 16 pixels
-		LOAD16(aa, da, cc, 0, 3, 13);
-		LOAD16(bb, db, aa, 16, 3, 13);
-		LOAD16(cc, dc, bb, 32, 3, 13);
+		LOAD16(da, 0, 3);
+		LOAD16(db, 16, 3);
+		LOAD16(dc, 32, 3);
 
 		if(_mm_test_all_zeros( _mm_or_si128(da, _mm_or_si128(db, dc)), _mm_set1_epi8(-1))){//all RLE
 			s.run+=16;
@@ -778,10 +768,6 @@ static enc_state qoi_encode_chunk3_sse(enc_state s){
 			QOI_SSE_QUICK;
 		}
 	}
-	_mm_storeu_si128((__m128i*)dump, cc);
-	s.px.rgba.r=dump[13];
-	s.px.rgba.g=dump[14];
-	s.px.rgba.b=dump[15];
 	return s;
 }
 #endif
@@ -792,6 +778,10 @@ static enc_state (*enc_bulk[])(enc_state)={
 	qoi_encode_chunk3_scalar, qoi_encode_chunk4_scalar
 #elif defined QOI_SSE
 	qoi_encode_chunk3_sse, qoi_encode_chunk4_sse
+#elif defined QOI_AVX2
+	qoi_encode_chunk3_avx2, qoi_encode_chunk4_avx2
+#elif defined QOI_AVX512
+	qoi_encode_chunk3_avx512, qoi_encode_chunk4_avx512
 #else
 #error "Must define instruction set at compile time. One of: QOI_SCALAR QOI_SSE"
 #endif

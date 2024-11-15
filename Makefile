@@ -6,7 +6,10 @@ WC ?= x86_64-w64-mingw32ucrt-gcc
 
 #Simple bench program to exercise PNG path and do roundtrip testing
 roibench:
-	$(CC) -Wall -O3 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=gnu99 qoibench.c -o roibench -llz4 -lpng -lzstd
+	$(CC) -Wall -Wextra -O3 -DROI -DQOI_SCALAR -std=gnu99 qoibench.c -o roibench -llz4 -lpng -lzstd
+
+roibench_sse:
+	$(CC) -Wall -Wextra -O3 -DROI -DQOI_SSE -msse -msse2 -msse3 -msse4 -std=gnu99 qoibench.c -o roibench_sse -llz4 -lpng -lzstd
 
 roiconv:
 	musl-gcc -static -Wall -Wextra -pedantic -O3 -Iwin32 -DROI -DQOI_SCALAR -std=c99 qoiconv.c -o roiconv

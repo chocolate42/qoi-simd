@@ -205,7 +205,7 @@ enough for anybody. */
 #define CHUNK 131072
 
 #define ENC_READ_RGBA do{ \
-	memcpy(&(s.px), s.pixels+s.px_pos, 4); \
+	memcpy(&px, s.pixels+s.px_pos, 4); \
 }while(0)
 
 typedef union {
@@ -238,20 +238,12 @@ static unsigned int qoi_read_32(const unsigned char *bytes, unsigned int *p) {
 #error "Format must be defined"
 #endif
 
-static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, unsigned int *p, qoi_rgba_t *px_prev) {
+static void qoi_encode_init(const qoi_desc *desc, unsigned char *bytes, unsigned int *p) {
 	qoi_write_32(bytes, p, QOI_MAGIC);
 	qoi_write_32(bytes, p, desc->width);
 	qoi_write_32(bytes, p, desc->height);
 	bytes[(*p)++] = desc->channels;
 	bytes[(*p)++] = desc->colorspace;
-	px_prev->rgba.r = 0;
-	px_prev->rgba.g = 0;
-	px_prev->rgba.b = 0;
-#ifdef ROI
-	px_prev->rgba.a = desc->channels==3?0:255;//simplify ENC_READ_RGB
-#else
-	px_prev->rgba.a = 255;
-#endif
 }
 
 void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const options *opt) {
@@ -286,11 +278,14 @@ void *qoi_encode(const void *data, const qoi_desc *desc, int *out_len, const opt
 	if(!(s.bytes = (unsigned char *) QOI_MALLOC(max_size)))
 		return NULL;
 	s.pixels=(unsigned char *)data;
-
-	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
+	memset(s.pixels-4, 0, 4);
+	if(desc->channels==4)
+		*(s.pixels-1)=255;
+	qoi_encode_init(desc, s.bytes, &(s.b));
 	if((desc->width * desc->height)/CHUNK){//encode most of the input as the largest multiple of chunk size for simd
 		s.pixel_cnt=(desc->width * desc->height)-((desc->width * desc->height)%CHUNK);
 		s=enc_bulk[desc->channels-3](s);
+		memcpy(s.pixels-4, (s.pixels+(CHUNK*desc->channels))-4, 4);//prev pixel
 	}
 	if((desc->width * desc->height)%CHUNK){//encode the trailing input scalar
 		s.pixel_cnt=(desc->width * desc->height);
@@ -483,12 +478,16 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 	if(!(fo=qoi_fopen(qoi_f, "wb")))
 		goto BADEXIT0;
 
-	if(!(s.pixels=QOI_MALLOC((CHUNK*desc->channels)+1)))
+	if(!(s.pixels_alloc=QOI_MALLOC((CHUNK*desc->channels)+65)))
 		goto BADEXIT1;
+	memset(s.pixels_alloc, 0, 64);
+	if(desc->channels==4)
+		s.pixels_alloc[63]=255;
+	s.pixels=s.pixels_alloc+64;
 	if(!(s.bytes=QOI_MALLOC(CHUNK*QOI_PIXEL_WORST_CASE)))
 		goto BADEXIT2;
 
-	qoi_encode_init(desc, s.bytes, &(s.b), &(s.px));
+	qoi_encode_init(desc, s.bytes, &(s.b));
 	if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 		goto BADEXIT3;
 
@@ -515,6 +514,7 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		s=enc_bulk[desc->channels-3](s);
 		if(s.b!=fwrite(s.bytes, 1, s.b, fo))
 			goto BADEXIT3;
+		memcpy(s.pixels-4, (s.pixels+(CHUNK*desc->channels))-4, 4);//prev pixel
 	}
 	if(i<totpixels){//finish scalar
 		if(((totpixels-i)*desc->channels)!=fread(s.pixels, 1, (totpixels-i)*desc->channels, fi))
@@ -534,13 +534,13 @@ static inline int qoi_write_from_file(FILE *fi, const char *qoi_f, qoi_desc *des
 		goto BADEXIT3;
 
 	QOI_FREE(s.bytes);
-	QOI_FREE(s.pixels);
+	QOI_FREE(s.pixels_alloc);
 	qoi_fclose(qoi_f, fo);
 	return 0;
 	BADEXIT3:
 	QOI_FREE(s.bytes);
 	BADEXIT2:
-	QOI_FREE(s.pixels);
+	QOI_FREE(s.pixels_alloc);
 	BADEXIT1:
 	qoi_fclose(qoi_f, fo);
 	BADEXIT0:

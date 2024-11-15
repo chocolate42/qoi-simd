@@ -13,6 +13,7 @@ Compile with:
 */
 
 #include <stdio.h>
+#include <string.h>
 #include <dirent.h>
 #include <png.h>
 #include "lz4.h"
@@ -179,7 +180,7 @@ void png_warning_callback(png_structp png_ptr, png_const_charp warning_msg) {
 	// Ignore warnings about sRGB profiles and such.
 }
 
-void *libpng_decode(void *data, int size, int *out_w, int *out_h) {	
+void *libpng_decode(void *data, int size, int *out_w, int *out_h) {
 	png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, png_warning_callback);
 	if (!png) {
 		ERROR("png_create_read_struct");
@@ -195,18 +196,18 @@ void *libpng_decode(void *data, int size, int *out_w, int *out_h) {
 		.size = size,
 		.data = data
 	};
-	
+
 	png_set_read_fn(png, &read_data, png_decode_callback);
 	png_set_sig_bytes(png, 0);
 	png_read_info(png, info);
-	
+
 	png_uint_32 w, h;
 	int bitDepth, colorType, interlaceType;
 	png_get_IHDR(png, info, &w, &h, &bitDepth, &colorType, &interlaceType, NULL, NULL);
-	
+
 	// 16 bit -> 8 bit
 	png_set_strip_16(png);
-	
+
 	// 1, 2, 4 bit -> 8 bit
 	if (bitDepth < 8) {
 		png_set_packing(png);
@@ -215,7 +216,7 @@ void *libpng_decode(void *data, int size, int *out_w, int *out_h) {
 	if (colorType & PNG_COLOR_MASK_PALETTE) {
 		png_set_expand(png);
 	}
-	
+
 	if (!(colorType & PNG_COLOR_MASK_COLOR)) {
 		png_set_gray_to_rgb(png);
 	}
@@ -224,28 +225,28 @@ void *libpng_decode(void *data, int size, int *out_w, int *out_h) {
 	if (png_get_valid(png, info, PNG_INFO_tRNS)) {
 		png_set_tRNS_to_alpha(png);
 	}
-	
+
 	// make sure every pixel has an alpha value
 	if (!(colorType & PNG_COLOR_MASK_ALPHA)) {
 		png_set_filler(png, 255, PNG_FILLER_AFTER);
 	}
-	
+
 	png_read_update_info(png, info);
 
 	unsigned char* out = malloc(w * h * 4);
 	*out_w = w;
 	*out_h = h;
-	
+
 	// png_uint_32 rowBytes = png_get_rowbytes(png, info);
 	png_bytep row_pointers[h];
 	for (png_uint_32 row = 0; row < h; row++ ) {
 		row_pointers[row] = (png_bytep)(out + (row * w * 4));
 	}
-	
+
 	png_read_image(png, row_pointers);
 	png_read_end(png, info);
 	png_destroy_read_struct( &png, &info, NULL);
-	
+
 	return out;
 }
 
@@ -419,16 +420,19 @@ benchmark_result_t benchmark_image(const char *path) {
 
 	if (channels != 3)
 		channels = 4;
-
 	void *pixels = (void *)stbi_load(path, &w, &h, NULL, channels);
-	pixels=realloc(pixels, (w*h*channels)+1);
+	pixels=realloc(pixels, (w*h*channels)+65);
+
+	memmove(pixels+64, pixels, w*h*channels);//hack to simplify simd code, qoi_encode requires leading allocated space
 	void *encoded_png = fload(path, &encoded_png_size);
-	void *encoded_qoi = qoi_encode(pixels, &(qoi_desc){
+
+	void *encoded_qoi = qoi_encode(pixels+64, &(qoi_desc){
 			.width = w,
 			.height = h, 
 			.channels = channels,
 			.colorspace = QOI_SRGB
 		}, &encoded_qoi_size, &opt);
+
 	void *encoded_qoi_lz4=NULL;
 	void *encoded_qoi_zstd1=NULL;
 	void *encoded_qoi_zstd3=NULL;
@@ -464,7 +468,7 @@ benchmark_result_t benchmark_image(const char *path) {
 	if (!opt_noverify) {
 		qoi_desc dc;
 		void *pixels_qoi = qoi_decode(encoded_qoi, encoded_qoi_size, &dc, channels);
-		if (memcmp(pixels, pixels_qoi, w * h * channels) != 0) {
+		if (memcmp(pixels+64, pixels_qoi, w * h * channels) != 0) {
 			ERROR(EXT_STR" roundtrip pixel mismatch for %s", path);
 		}
 		free(pixels_qoi);
@@ -574,7 +578,7 @@ benchmark_result_t benchmark_image(const char *path) {
 
 		BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[QOILIKE].encode_time, {
 			int enc_size;
-			void *enc_p = qoi_encode(pixels, &(qoi_desc){
+			void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 				.width = w,
 				.height = h, 
 				.channels = channels,
@@ -588,7 +592,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[LZ4].encode_time, {
 				int enc_size;
 				void *enc;
-				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+				void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 					.width = w,
 					.height = h, 
 					.channels = channels,
@@ -605,7 +609,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD1].encode_time, {
 				int enc_size;
 				void *enc;
-				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+				void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 					.width = w,
 					.height = h, 
 					.channels = channels,
@@ -622,7 +626,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD3].encode_time, {
 				int enc_size;
 				void *enc;
-				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+				void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 					.width = w,
 					.height = h, 
 					.channels = channels,
@@ -639,7 +643,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD9].encode_time, {
 				int enc_size;
 				void *enc;
-				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+				void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 					.width = w,
 					.height = h, 
 					.channels = channels,
@@ -656,7 +660,7 @@ benchmark_result_t benchmark_image(const char *path) {
 			BENCHMARK_FN(opt_nowarmup, opt_runs, res.libs[ZSTD19].encode_time, {
 				int enc_size;
 				void *enc;
-				void *enc_p = qoi_encode(pixels, &(qoi_desc){
+				void *enc_p = qoi_encode(pixels+64, &(qoi_desc){
 					.width = w,
 					.height = h, 
 					.channels = channels,
@@ -706,7 +710,7 @@ void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
 	}
 
 	benchmark_result_t dir_total = {0};
-	
+
 	int has_shown_head = 0;
 	for (int i = 0; (file = readdir(dir)) != NULL; i++) {
 		if (strcmp(file->d_name + strlen(file->d_name) - 4, ".png") != 0) {
@@ -720,7 +724,7 @@ void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
 
 		char *file_path = malloc(strlen(file->d_name) + strlen(path)+8);
 		sprintf(file_path, "%s/%s", path, file->d_name);
-		
+
 		benchmark_result_t res = benchmark_image(file_path);
 
 		if (!opt_onlytotals) {
@@ -729,7 +733,7 @@ void benchmark_directory(const char *path, benchmark_result_t *grand_total) {
 		}
 
 		free(file_path);
-		
+
 		dir_total.count++;
 		dir_total.raw_size += res.raw_size;
 		dir_total.px += res.px;
@@ -777,7 +781,6 @@ int main(int argc, char **argv) {
 		printf(" --nozstd3        don't benchmark chained zstd compression level 3\n");
 		printf(" --nozstd9        don't benchmark chained zstd compression level 9\n");
 		printf(" --nozstd19       don't benchmark chained zstd compression level 19\n");
-		printf(" --scalar         use scalar encode path (default)\n");
 #ifdef ROI
 		printf(" --mlut           use mlut on encode\n");
 #ifndef QOI_MLUT_EMBED
