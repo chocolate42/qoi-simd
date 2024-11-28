@@ -25,11 +25,11 @@ roi is a qoi-like format using the following ops:
 
 ```
 LPCB benchmark
-           size       ratio encode   decode    codepath    Notes
+           size       ratio encode   decode   codepath    Notes
 ppm        3462571880
-qoi        1993357658 0.576 0m8.312s 0m 6.713s Scalar
-roi        1840638105 0.532 0m6.572s 0m 5.325s Scalar
-           1840638105 0.532 0m3.311s           Scalar mlut Identical output, uses 80MiB LUT to encode
-           1840638105 0.532 0m3.222s           SSE         Identical output
+qoi        1993357658 0.576 0m7.336s 0m6.785s Scalar
+roi        1840638105 0.532 0m5.583s 0m5.361s Scalar
+           1840638105 0.532 0m3.113s          Scalar mlut Identical output, uses 80MiB LUT to encode
+           1840638105 0.532 0m2.677s          SSE         Identical output
 ```
 
